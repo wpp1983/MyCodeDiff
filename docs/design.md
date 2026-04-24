@@ -36,10 +36,13 @@ MyCodeDiff 第一版是一个本地 Windows 桌面应用，用于查看 P4 Pendi
 ### 3.1 桌面和前端
 
 - Electron
-- React
+- React 18
 - TypeScript
 - Vite
 - Bun
+- `electron-vite`：用于同时构建 main、preload、renderer 三个 target 的统一脚手架。
+- `electron-builder`：用于 M6 Windows 打包。
+- `bun test`：统一测试框架；涉及 DOM 的组件测试在测试侧按需引入 `happy-dom`。
 
 ### 3.2 核心依赖
 

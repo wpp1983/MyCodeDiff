@@ -36,10 +36,18 @@ bun run build
 真实 P4 环境可用性检查：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\test-p4-env.ps1 -Workspace "C:\work\wp_dev_1"
+pwsh -ExecutionPolicy Bypass -File scripts\test-p4-env.ps1 -Workspace "C:\work\wp_dev_1"
 ```
 
+必须使用 PowerShell 7 (`pwsh`)，不能使用 Windows PowerShell 5.1 (`powershell.exe`)。脚本内部依赖 `System.Diagnostics.ProcessStartInfo.ArgumentList`，该属性仅在 .NET Core 3.0+/PowerShell 7+ 可用；在 Windows PowerShell 5.1 下会导致所有 `p4` 子命令以无参形式被调用，并错误判定为成功。
+
 该脚本只执行只读检查，包括 workspace、`.p4config`、`p4 set`、DNS/TCP、`p4 info`、`p4 client -o`、pending CL 列表和 history CL 列表。
+
+Codex Windows 注意事项：
+
+- 如果 Codex shell 缺少 `SystemRoot` 或 `WINDIR`，Winsock provider path 中的 `%SystemRoot%` 无法展开，会导致 `p4`、`curl` 或 TCP socket 创建失败，典型错误为 `WSAEPROVIDERFAILEDINIT`。
+- `scripts/test-p4-env.ps1` 会在脚本内补齐 `SystemRoot=C:\Windows` 和 `WINDIR=C:\Windows`。
+- 后续 Codex agent 直接运行 P4 命令时，也应在命令前补齐这两个环境变量。
 
 ## 3. Milestone 1：项目脚手架
 
@@ -76,10 +84,12 @@ bun run typecheck
 
 内容：
 
-- 配置 renderer Vite 构建。
+- 使用 `electron-vite` 作为统一脚手架，同时构建 main、preload、renderer 三个 target。
+- 配置 renderer Vite 构建（React 插件）。
 - 配置 main/preload TypeScript 构建。
 - 配置 `dev`、`build`、`typecheck`、`test` 脚本。
 - 确保 Electron 能加载本地 renderer。
+- M6 打包使用 `electron-builder`，Windows 为首要目标。
 
 验收：
 
@@ -122,9 +132,10 @@ bun run typecheck
 
 内容：
 
-- 选择并配置测试工具。
+- 统一使用 `bun test` 作为测试框架。
 - 建立 `src/**/*.test.ts` 或 `tests` 测试目录。
 - 添加一个 smoke test。
+- 组件级 DOM 测试如果出现，按需引入 `happy-dom`，不引入第二套测试框架。
 
 验收：
 

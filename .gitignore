@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+bun.lockb.bak
+
+# Build output
+dist/
+out/
+build/
+.vite/
+.electron-vite/
+
+# Electron packaging
+release/
+*.exe
+*.msi
+*.nupkg
+*.blockmap
+
+# TypeScript
+*.tsbuildinfo
+
+# Testing
+coverage/
+.nyc_output/
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.example.json
+.idea/
+*.swp
+
+# Claude Code 本地配置
+.claude/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Runtime / logs
+*.log
+logs/
+pids/
+*.pid
+
+# Scripts 产生的诊断工件
+.tmp-winsock-catalog.txt
+.tmp-network-check.txt
