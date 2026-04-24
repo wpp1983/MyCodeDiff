@@ -8,6 +8,14 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Continue"
 
+if (-not $env:SystemRoot) {
+  $env:SystemRoot = "C:\Windows"
+}
+
+if (-not $env:WINDIR) {
+  $env:WINDIR = $env:SystemRoot
+}
+
 function Write-Section {
   param([string]$Title)
   Write-Host ""
@@ -292,7 +300,7 @@ foreach ($key in $summary.Keys) {
   }
 }
 
-if ($summary.P4InfoOk) {
+if ($summary.P4InfoOk -and $summary.ClientViewOk -and $summary.PendingListOk -and $summary.HistoryListOk) {
   exit 0
 }
 
