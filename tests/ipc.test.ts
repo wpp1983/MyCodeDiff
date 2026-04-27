@@ -28,6 +28,7 @@ describe("registerIpcHandlers", () => {
       "mycodediff:getP4Environment",
       "mycodediff:listHistoryChanges",
       "mycodediff:listPendingChanges",
+      "mycodediff:listShelvedChanges",
       "mycodediff:loadChangelist",
       "mycodediff:loadFileContentPair",
       "mycodediff:updateConfig",

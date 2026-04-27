@@ -47,22 +47,71 @@ describe("loadChangelist pending", () => {
         stdout:
           "//depot/a/a.ts#3 - edit default change (text)\n//depot/a/b.ts - add default change (text)\n",
       },
+      "describe -S -s 900": { stdout: "" },
     });
     const svc = buildService({ runner });
     const summary = await svc.loadChangelist({ id: "900", kind: "pending" });
     expect(summary.files.map((f) => f.status)).toEqual(["modified", "added"]);
     expect(summary.files[0]!.oldRev).toBe("3");
+    expect(summary.files.every((f) => !f.shelved)).toBe(true);
   });
 
   test("flags large change when exceeding threshold", async () => {
     const lines = Array.from({ length: 510 }, (_, i) =>
       `//depot/a/f${i}.ts - edit default change (text)`
     ).join("\n");
-    const runner = runnerFromMap({ "opened -c 900": { stdout: lines } });
+    const runner = runnerFromMap({
+      "opened -c 900": { stdout: lines },
+      "describe -S -s 900": { stdout: "" },
+    });
     const svc = buildService({ runner, largeChangeFileCountThreshold: 500 });
     const summary = await svc.loadChangelist({ id: "900", kind: "pending" });
     expect(summary.largeChange).toBe(true);
     expect(summary.files.length).toBe(510);
+  });
+
+  test("merges shelved files alongside opened files (P4V-style)", async () => {
+    const describeOutput = [
+      "Change 900 by alice@wp on 2024/11/20 10:00:00 *pending*",
+      "",
+      "\tmessage",
+      "",
+      "Shelved files ...",
+      "",
+      "... //depot/a/shelf.ts#7 edit",
+      "... //depot/a/new-shelf.ts#1 add",
+      "",
+    ].join("\n");
+    const runner = runnerFromMap({
+      "opened -c 900": {
+        stdout: "//depot/a/a.ts#3 - edit default change (text)\n",
+      },
+      "describe -S -s 900": { stdout: describeOutput },
+    });
+    const svc = buildService({ runner });
+    const summary = await svc.loadChangelist({ id: "900", kind: "pending" });
+    expect(summary.files).toHaveLength(3);
+    const opened = summary.files.filter((f) => !f.shelved);
+    const shelved = summary.files.filter((f) => f.shelved);
+    expect(opened.map((f) => f.depotPath)).toEqual(["//depot/a/a.ts"]);
+    expect(shelved.map((f) => f.depotPath)).toEqual([
+      "//depot/a/shelf.ts",
+      "//depot/a/new-shelf.ts",
+    ]);
+    expect(shelved[0]!.oldRev).toBe("7");
+    expect(shelved[1]!.oldRev).toBeUndefined();
+  });
+
+  test("default CL skips shelved fetch", async () => {
+    const runner = runnerFromMap({
+      "opened -c default": {
+        stdout: "//depot/a/a.ts#3 - edit default change (text)\n",
+      },
+    });
+    const svc = buildService({ runner });
+    const summary = await svc.loadChangelist({ id: "default", kind: "pending" });
+    expect(summary.files).toHaveLength(1);
+    expect(summary.files[0]!.shelved).toBeFalsy();
   });
 });
 
@@ -252,6 +301,184 @@ describe("loadFileContentPair submitted", () => {
     });
     expect(pair.leftText).toBeNull();
     expect(pair.rightText).toBe("added\n");
+  });
+});
+
+describe("loadChangelist shelved", () => {
+  test("uses describe -S and treats revision as oldRev for edits", async () => {
+    const describeOutput = [
+      "Change 7700 by alice@wp on 2024/11/20 10:00:00 *pending*",
+      "",
+      "\tshelved work",
+      "",
+      "Shelved files ...",
+      "",
+      "... //depot/a/a.ts#5 edit",
+      "... //depot/a/new.ts#1 add",
+      "... //depot/a/gone.ts#3 delete",
+      "",
+    ].join("\n");
+    const runner = runnerFromMap({
+      "describe -S -s 7700": { stdout: describeOutput },
+    });
+    const svc = buildService({ runner });
+    const summary = await svc.loadChangelist({ id: "7700", kind: "shelved" });
+    expect(summary.kind).toBe("shelved");
+    expect(summary.files).toHaveLength(3);
+    expect(summary.files[0]!.oldRev).toBe("5");
+    expect(summary.files[0]!.newRev).toBeUndefined();
+    expect(summary.files[1]!.oldRev).toBeUndefined();
+    expect(summary.files[2]!.oldRev).toBe("3");
+  });
+});
+
+describe("loadFileContentPair shelved", () => {
+  test("edit: left=print#oldRev, right=print@=CL", async () => {
+    const describeOutput = [
+      "Change 7700 by alice@wp on 2024/11/20 10:00:00 *pending*",
+      "",
+      "\tmessage",
+      "",
+      "Shelved files ...",
+      "",
+      "... //depot/a/a.ts#5 edit",
+      "",
+    ].join("\n");
+    const runner = runnerFromMap({
+      "describe -S -s 7700": { stdout: describeOutput },
+      "print -q //depot/a/a.ts#5": { stdout: "old\n" },
+      "print -q //depot/a/a.ts@=7700": { stdout: "shelved\n" },
+      "fstat -Ol -T fileSize //depot/a/a.ts@=7700": {
+        stdout: "... fileSize 8\n",
+      },
+    });
+    const svc = buildService({ runner });
+    const pair = await svc.loadFileContentPair({
+      changelistId: "7700",
+      kind: "shelved",
+      depotPath: "//depot/a/a.ts",
+    });
+    expect(pair.leftText).toBe("old\n");
+    expect(pair.rightText).toBe("shelved\n");
+    expect(pair.leftLabel).toBe("//depot/a/a.ts#5");
+    expect(pair.rightLabel).toBe("//depot/a/a.ts@=7700");
+  });
+
+  test("add: left null, right=print@=CL", async () => {
+    const describeOutput = [
+      "Change 7700 by alice@wp on 2024/11/20 10:00:00 *pending*",
+      "",
+      "\tmessage",
+      "",
+      "Shelved files ...",
+      "",
+      "... //depot/a/new.ts#1 add",
+      "",
+    ].join("\n");
+    const runner = runnerFromMap({
+      "describe -S -s 7700": { stdout: describeOutput },
+      "print -q //depot/a/new.ts@=7700": { stdout: "added\n" },
+      "fstat -Ol -T fileSize //depot/a/new.ts@=7700": {
+        stdout: "... fileSize 6\n",
+      },
+    });
+    const svc = buildService({ runner });
+    const pair = await svc.loadFileContentPair({
+      changelistId: "7700",
+      kind: "shelved",
+      depotPath: "//depot/a/new.ts",
+    });
+    expect(pair.leftText).toBeNull();
+    expect(pair.rightText).toBe("added\n");
+    expect(pair.leftLabel).toBe("(new)");
+    expect(pair.rightLabel).toBe("//depot/a/new.ts@=7700");
+  });
+
+  test("large shelved text without confirmation throws LARGE_FILE_REQUIRES_CONFIRMATION", async () => {
+    const describeOutput = [
+      "Change 7700 by alice@wp on 2024/11/20 10:00:00 *pending*",
+      "",
+      "\tmessage",
+      "",
+      "Shelved files ...",
+      "",
+      "... //depot/a/big.ts#5 edit",
+      "",
+    ].join("\n");
+    const runner = runnerFromMap({
+      "describe -S -s 7700": { stdout: describeOutput },
+      "print -q //depot/a/big.ts#5": { stdout: "old\n" },
+      "fstat -Ol -T fileSize //depot/a/big.ts@=7700": {
+        stdout: "... fileSize 5242880\n",
+      },
+    });
+    const svc = buildService({ runner, largeFileThresholdBytes: 2 * 1024 * 1024 });
+    await expect(
+      svc.loadFileContentPair({
+        changelistId: "7700",
+        kind: "shelved",
+        depotPath: "//depot/a/big.ts",
+      })
+    ).rejects.toMatchObject({ code: "LARGE_FILE_REQUIRES_CONFIRMATION" });
+  });
+
+  test("loadPending merges only Shelved section even if describe -S also returns Affected", async () => {
+    // p4 describe -S can return both Affected and Shelved sections; only the
+    // shelved section should appear with shelved=true.
+    const describeOutput = [
+      "Change 900 by alice@wp on 2024/11/20 10:00:00 *pending*",
+      "",
+      "\tmessage",
+      "",
+      "Affected files ...",
+      "",
+      "... //depot/a/opened.ts#3 edit",
+      "",
+      "Shelved files ...",
+      "",
+      "... //depot/a/shelf.ts#7 edit",
+      "",
+    ].join("\n");
+    const runner = runnerFromMap({
+      "opened -c 900": {
+        stdout: "//depot/a/opened.ts#3 - edit default change (text)\n",
+      },
+      "describe -S -s 900": { stdout: describeOutput },
+    });
+    const svc = buildService({ runner });
+    const summary = await svc.loadChangelist({ id: "900", kind: "pending" });
+    // 1 opened + 1 shelved (the affected entry from describe -S must NOT be re-added)
+    expect(summary.files).toHaveLength(2);
+    const opened = summary.files.filter((f) => !f.shelved);
+    const shelved = summary.files.filter((f) => f.shelved);
+    expect(opened.map((f) => f.depotPath)).toEqual(["//depot/a/opened.ts"]);
+    expect(shelved.map((f) => f.depotPath)).toEqual(["//depot/a/shelf.ts"]);
+  });
+
+  test("delete: left=print#oldRev, right null", async () => {
+    const describeOutput = [
+      "Change 7700 by alice@wp on 2024/11/20 10:00:00 *pending*",
+      "",
+      "\tmessage",
+      "",
+      "Shelved files ...",
+      "",
+      "... //depot/a/gone.ts#3 delete",
+      "",
+    ].join("\n");
+    const runner = runnerFromMap({
+      "describe -S -s 7700": { stdout: describeOutput },
+      "print -q //depot/a/gone.ts#3": { stdout: "removed\n" },
+    });
+    const svc = buildService({ runner });
+    const pair = await svc.loadFileContentPair({
+      changelistId: "7700",
+      kind: "shelved",
+      depotPath: "//depot/a/gone.ts",
+    });
+    expect(pair.leftText).toBe("removed\n");
+    expect(pair.rightText).toBeNull();
+    expect(pair.rightLabel).toBe("(deleted)");
   });
 });
 

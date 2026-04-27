@@ -1,4 +1,4 @@
-import type { ChangelistListItem, FileChangeStatus } from "../models/changeModels";
+import type { ChangeKind, ChangelistListItem, FileChangeStatus } from "../models/changeModels";
 import type { P4ClientView, P4InfoFields } from "./p4Types";
 
 const INFO_KEY_MAP: Record<string, keyof P4InfoFields> = {
@@ -138,7 +138,7 @@ function depotPathRoot(depotPath: string): string | null {
 
 export function parseChangesOutput(
   stdout: string,
-  kind: "pending" | "submitted"
+  kind: ChangeKind
 ): ChangelistListItem[] {
   const items: ChangelistListItem[] = [];
   const lines = stdout.split(/\r?\n/);
@@ -220,7 +220,7 @@ export function parseOpenedOutput(stdout: string): ParsedOpenedFile[] {
     const line = rawLine.trim();
     if (!line) continue;
     const match = line.match(
-      /^(\/\/[^#]+)(?:#(\d+))?\s+-\s+(\w+)(?:\s+(?:default\s+change|change\s+(\d+)))?\s+\(([^)]+)\)/
+      /^(\/\/[^#]+)(?:#(\d+))?\s+-\s+([\w/]+)(?:\s+(?:default\s+change|change\s+(\d+)))?\s+\(([^)]+)\)/
     );
     if (!match) continue;
     const [, depotPath, revision, action, change, fileType] = match;
@@ -250,30 +250,43 @@ export type ParsedDescribe = {
   description?: string;
   date?: string;
   status?: string;
+  /** Files committed (submitted CL) or otherwise present under "Affected files ...". */
   files: ParsedDescribeFile[];
+  /** Files under the "Shelved files ..." section (only present with `p4 describe -S`). */
+  shelvedFiles: ParsedDescribeFile[];
 };
+
+type DescribeSection = "none" | "affected" | "shelved";
 
 export function parseDescribeOutput(stdout: string): ParsedDescribe | null {
   const lines = stdout.split(/\r?\n/);
   let header: string | undefined;
   const descLines: string[] = [];
-  const fileLines: string[] = [];
-  let inAffected = false;
+  const affectedLines: string[] = [];
+  const shelvedLines: string[] = [];
+  let section: DescribeSection = "none";
   for (const rawLine of lines) {
     if (rawLine.startsWith("Change ")) {
       header = rawLine;
       continue;
     }
     if (rawLine.startsWith("Affected files")) {
-      inAffected = true;
+      section = "affected";
+      continue;
+    }
+    if (rawLine.startsWith("Shelved files")) {
+      section = "shelved";
       continue;
     }
     if (rawLine.startsWith("Differences ...") || rawLine.startsWith("Moved files ...")) {
-      inAffected = false;
+      section = "none";
       continue;
     }
-    if (inAffected) {
-      if (rawLine.startsWith("... ")) fileLines.push(rawLine);
+    if (section !== "none") {
+      if (rawLine.startsWith("... ")) {
+        if (section === "affected") affectedLines.push(rawLine);
+        else shelvedLines.push(rawLine);
+      }
       continue;
     }
     if (rawLine.startsWith("\t")) descLines.push(rawLine.slice(1));
@@ -285,18 +298,23 @@ export function parseDescribeOutput(stdout: string): ParsedDescribe | null {
   if (!headerMatch) return null;
   const [, id, author, client, date, status] = headerMatch;
 
-  const files: ParsedDescribeFile[] = [];
-  for (const fl of fileLines) {
-    const m = fl.match(/^\.\.\. (\/\/[^#]+)#(\d+)\s+(\w+)/);
-    if (!m) continue;
-    const [, depotPath, revision, action] = m;
-    if (!depotPath || !revision || !action) continue;
-    files.push({ depotPath, revision, action });
-  }
+  const parseFiles = (rawLines: string[]): ParsedDescribeFile[] => {
+    const out: ParsedDescribeFile[] = [];
+    for (const fl of rawLines) {
+      const m = fl.match(/^\.\.\. (\/\/[^#]+)#(\d+)\s+([\w/]+)/);
+      if (!m) continue;
+      const [, depotPath, revision, action] = m;
+      if (!depotPath || !revision || !action) continue;
+      out.push({ depotPath, revision, action });
+    }
+    return out;
+  };
+
   if (!id) return null;
   const parsed: ParsedDescribe = {
     id,
-    files,
+    files: parseFiles(affectedLines),
+    shelvedFiles: parseFiles(shelvedLines),
   };
   if (author) parsed.author = author;
   if (client) parsed.client = client;

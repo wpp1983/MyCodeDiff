@@ -6,6 +6,7 @@ const api: MyCodeDiffApi = {
   listPendingChanges: () => ipcRenderer.invoke("mycodediff:listPendingChanges"),
   listHistoryChanges: (input) =>
     ipcRenderer.invoke("mycodediff:listHistoryChanges", input),
+  listShelvedChanges: () => ipcRenderer.invoke("mycodediff:listShelvedChanges"),
   loadChangelist: (input) => ipcRenderer.invoke("mycodediff:loadChangelist", input),
   loadFileContentPair: (input) =>
     ipcRenderer.invoke("mycodediff:loadFileContentPair", input),

@@ -148,7 +148,7 @@ export function HistoryPage(props: HistoryPageProps) {
           {store.state.selectedCl ? (
             <FileListView
               files={filteredFiles}
-              selectedDepotPath={store.state.selectedFile?.depotPath}
+              selectedFile={store.state.selectedFile}
               onSelect={(f) => void store.selectFile(f)}
             />
           ) : (

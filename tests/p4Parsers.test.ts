@@ -149,6 +149,16 @@ describe("parseOpenedOutput", () => {
     });
     expect(files[3]!.fileType).toBe("binary");
   });
+
+  test("parses move/add and move/delete (slash in action)", () => {
+    const stdout =
+      "//depot/a/old.ts#3 - move/delete default change (text)\n" +
+      "//depot/a/new.ts - move/add default change (text)\n";
+    const files = parseOpenedOutput(stdout);
+    expect(files).toHaveLength(2);
+    expect(files[0]!.action).toBe("move/delete");
+    expect(files[1]!.action).toBe("move/add");
+  });
 });
 
 describe("parseDescribeOutput", () => {
@@ -173,6 +183,50 @@ describe("parseDescribeOutput", () => {
     expect(parsed!.description).toContain("Fix bug");
     expect(parsed!.files).toHaveLength(2);
     expect(parsed!.files[0]!.action).toBe("edit");
+    expect(parsed!.shelvedFiles).toHaveLength(0);
+  });
+
+  test("parses move/add and move/delete actions", () => {
+    const stdout = [
+      "Change 9002 by alice@wp on 2024/11/20 10:00:00",
+      "",
+      "\tmsg",
+      "",
+      "Affected files ...",
+      "",
+      "... //depot/a/old.ts#4 move/delete",
+      "... //depot/a/new.ts#1 move/add",
+      "",
+    ].join("\n");
+    const parsed = parseDescribeOutput(stdout);
+    expect(parsed!.files).toHaveLength(2);
+    expect(parsed!.files[0]!.action).toBe("move/delete");
+    expect(parsed!.files[1]!.action).toBe("move/add");
+  });
+
+  test("separates affected and shelved sections (describe -S output)", () => {
+    const stdout = [
+      "Change 7700 by alice@wp on 2024/11/20 10:00:00 *pending*",
+      "",
+      "\tdesc",
+      "",
+      "Affected files ...",
+      "",
+      "... //depot/a/opened.ts#3 edit",
+      "",
+      "Shelved files ...",
+      "",
+      "... //depot/a/shelf.ts#5 edit",
+      "... //depot/a/new-shelf.ts#1 add",
+      "",
+    ].join("\n");
+    const parsed = parseDescribeOutput(stdout);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.files.map((f) => f.depotPath)).toEqual(["//depot/a/opened.ts"]);
+    expect(parsed!.shelvedFiles.map((f) => f.depotPath)).toEqual([
+      "//depot/a/shelf.ts",
+      "//depot/a/new-shelf.ts",
+    ]);
   });
 });
 

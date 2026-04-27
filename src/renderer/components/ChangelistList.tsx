@@ -52,8 +52,10 @@ function shortDate(s?: string): string {
   return m && m[1] ? m[1] : s;
 }
 
-function statusKind(item: ChangelistListItem): "pending" | "submitted" {
-  return item.kind === "pending" ? "pending" : "submitted";
+function statusKind(item: ChangelistListItem): "pending" | "submitted" | "shelved" {
+  if (item.kind === "pending") return "pending";
+  if (item.kind === "shelved") return "shelved";
+  return "submitted";
 }
 
 export function ChangelistList(props: ChangelistListProps) {

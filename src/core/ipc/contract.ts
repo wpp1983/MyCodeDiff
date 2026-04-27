@@ -38,6 +38,7 @@ export type MyCodeDiffApi = {
   getP4Environment(): Promise<P4Environment>;
   listPendingChanges(): Promise<ChangelistListItem[]>;
   listHistoryChanges(input: ListHistoryChangesInput): Promise<ChangelistListItem[]>;
+  listShelvedChanges(): Promise<ChangelistListItem[]>;
   loadChangelist(input: LoadChangelistInput): Promise<ChangelistSummary>;
   loadFileContentPair(input: LoadFileContentPairInput): Promise<FileContentPair>;
   getConfig(): Promise<AppConfig>;
@@ -48,6 +49,7 @@ export type MyCodeDiffIpcChannel =
   | "mycodediff:getP4Environment"
   | "mycodediff:listPendingChanges"
   | "mycodediff:listHistoryChanges"
+  | "mycodediff:listShelvedChanges"
   | "mycodediff:loadChangelist"
   | "mycodediff:loadFileContentPair"
   | "mycodediff:getConfig"

@@ -579,6 +579,26 @@ body {
   font-size: 12px;
 }
 
+.file-list-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 6px;
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-1);
+  font-size: 11px;
+  color: var(--fg-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.file-list-section-label { font-weight: 600; }
+.file-list-section-count {
+  margin-left: auto;
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
+}
+
 .file-row {
   padding: 6px 12px 6px 10px;
   display: grid;

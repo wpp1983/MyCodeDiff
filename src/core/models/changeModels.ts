@@ -1,4 +1,4 @@
-export type ChangeKind = "pending" | "submitted";
+export type ChangeKind = "pending" | "submitted" | "shelved";
 
 export type FileChangeStatus =
   | "added"
@@ -30,6 +30,8 @@ export type ChangeFile = {
   isText?: boolean;
   sizeBytes?: number;
   fileType?: string;
+  /** True when the file is part of the changelist's shelved files (server-side, not workspace). */
+  shelved?: boolean;
 };
 
 export type ChangelistSummary = {

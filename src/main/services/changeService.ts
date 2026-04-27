@@ -40,6 +40,7 @@ export type ChangeServiceOptions = {
 export type ChangeService = {
   listPendingChanges(): Promise<ChangelistListItem[]>;
   listHistoryChanges(input: ListHistoryChangesInput): Promise<ChangelistListItem[]>;
+  listShelvedChanges(): Promise<ChangelistListItem[]>;
   loadChangelist(input: LoadChangelistInput): Promise<ChangelistSummary>;
   loadFileContentPair(input: LoadFileContentPairInput): Promise<FileContentPair>;
   getEnvironment(): Promise<P4Environment>;
@@ -109,8 +110,20 @@ export function createChangeService(options: ChangeServiceOptions): ChangeServic
     return p4.listSubmittedChanges(depotPath, limit);
   }
 
+  async function listShelvedChanges(): Promise<ChangelistListItem[]> {
+    const env = await p4.getEnvironment();
+    if (!env.available) {
+      throw new AppError(
+        (env.errorCode as any) ?? "P4_COMMAND_FAILED",
+        env.errorMessage ?? "P4 unavailable"
+      );
+    }
+    return p4.listShelvedChanges(env.user);
+  }
+
   async function loadChangelist(input: LoadChangelistInput): Promise<ChangelistSummary> {
     if (input.kind === "pending") return loadPending(input.id);
+    if (input.kind === "shelved") return loadShelved(input.id);
     return loadSubmitted(input.id);
   }
 
@@ -127,6 +140,26 @@ export function createChangeService(options: ChangeServiceOptions): ChangeServic
       if (o.fileType) file.fileType = o.fileType;
       return file;
     });
+
+    // The default CL cannot hold shelved files; numbered pending CLs may.
+    if (id !== "default") {
+      try {
+        const shelvedDescribe = await p4.describeShelved(id);
+        if (shelvedDescribe) {
+          // Only the shelvedFiles section — `describe -S` may also include the
+          // CL's affected files which we must NOT mistake for shelved entries.
+          for (const sf of shelvedDescribe.shelvedFiles) {
+            const file = fileFromShelvedDescribe(sf);
+            file.shelved = true;
+            files.push(file);
+          }
+        }
+      } catch (err) {
+        // describe -S throws if there are no shelved files in some servers; degrade gracefully
+        console.warn("[changeService] p4 describe -S failed:", err);
+      }
+    }
+
     const largeChange = files.length > largeChangeThreshold;
     return {
       id,
@@ -154,10 +187,33 @@ export function createChangeService(options: ChangeServiceOptions): ChangeServic
     return summary;
   }
 
+  async function loadShelved(id: string): Promise<ChangelistSummary> {
+    const described = await p4.describeShelved(id);
+    if (!described) throw new AppError("CHANGE_NOT_FOUND", `Changelist ${id} not found.`);
+    const files: ChangeFile[] = described.shelvedFiles.map((f) => {
+      const file = fileFromShelvedDescribe(f);
+      file.shelved = true;
+      return file;
+    });
+    const largeChange = files.length > largeChangeThreshold;
+    const summary: ChangelistSummary = {
+      id: described.id,
+      kind: "shelved",
+      files,
+      largeChange,
+    };
+    if (described.author) summary.author = described.author;
+    if (described.client) summary.client = described.client;
+    if (described.description) summary.description = described.description;
+    if (described.status) summary.status = described.status;
+    return summary;
+  }
+
   async function loadFileContentPair(
     input: LoadFileContentPairInput
   ): Promise<FileContentPair> {
     if (input.kind === "pending") return loadPendingContent(input);
+    if (input.kind === "shelved") return loadShelvedContent(input);
     return loadSubmittedContent(input);
   }
 
@@ -167,6 +223,10 @@ export function createChangeService(options: ChangeServiceOptions): ChangeServic
     const opened = await p4.opened(input.changelistId);
     const match = opened.find((o) => o.depotPath === input.depotPath);
     if (!match) {
+      // Not opened in workspace — try shelved files of the same CL.
+      if (input.changelistId !== "default") {
+        return loadShelvedContent({ ...input, kind: "shelved" });
+      }
       throw new AppError(
         "CHANGE_NOT_FOUND",
         `File ${input.depotPath} not found in CL ${input.changelistId}`
@@ -291,6 +351,90 @@ export function createChangeService(options: ChangeServiceOptions): ChangeServic
     return { file, leftLabel, rightLabel, leftText, rightText, kind };
   }
 
+  async function loadShelvedContent(
+    input: LoadFileContentPairInput
+  ): Promise<FileContentPair> {
+    const described = await p4.describeShelved(input.changelistId);
+    if (!described) {
+      throw new AppError("CHANGE_NOT_FOUND", `Changelist ${input.changelistId} not found.`);
+    }
+    const match = described.shelvedFiles.find((f) => f.depotPath === input.depotPath);
+    if (!match) {
+      throw new AppError(
+        "CHANGE_NOT_FOUND",
+        `File ${input.depotPath} not found in shelved CL ${input.changelistId}`
+      );
+    }
+    const file = fileFromShelvedDescribe(match);
+    const kind = getDiffKind(file.depotPath);
+    if (!file.isText && kind !== "xlsx-sheets") {
+      throw new AppError("BINARY_FILE", `${file.depotPath} is binary`);
+    }
+
+    const action = (file.action ?? "").toLowerCase();
+    let leftLabel = "";
+    let rightLabel = "";
+
+    if (action === "add" || action === "branch" || action === "move/add") {
+      leftLabel = "(new)";
+      rightLabel = `${file.depotPath}@=${input.changelistId}`;
+    } else if (action === "delete" || action === "move/delete" || action === "purge") {
+      leftLabel = `${file.depotPath}#${file.oldRev ?? ""}`;
+      rightLabel = "(deleted)";
+    } else {
+      leftLabel = `${file.depotPath}#${file.oldRev ?? ""}`;
+      rightLabel = `${file.depotPath}@=${input.changelistId}`;
+    }
+
+    if (kind === "xlsx-sheets") {
+      const leftSheets =
+        action === "add" || action === "branch" || action === "move/add" || !file.oldRev
+          ? []
+          : parseXlsxBuffer(
+              await printBufferGuarded(file.depotPath, file.oldRev, input.confirmLargeFile)
+            );
+      const rightSheets =
+        action === "delete" || action === "move/delete" || action === "purge"
+          ? []
+          : parseXlsxBuffer(
+              await printShelvedBufferGuarded(
+                file.depotPath,
+                input.changelistId,
+                input.confirmLargeFile
+              )
+            );
+      return buildXlsxPair(file, leftLabel, rightLabel, leftSheets, rightSheets);
+    }
+
+    let leftText: string | null = null;
+    let rightText: string | null = null;
+
+    if (action === "add" || action === "branch" || action === "move/add") {
+      rightText = await readShelvedText(
+        file.depotPath,
+        input.changelistId,
+        kind,
+        input.confirmLargeFile
+      );
+    } else if (action === "delete" || action === "move/delete" || action === "purge") {
+      leftText = file.oldRev
+        ? await readDepotText(file.depotPath, file.oldRev, kind, input.confirmLargeFile)
+        : null;
+    } else {
+      if (file.oldRev) {
+        leftText = await readDepotText(file.depotPath, file.oldRev, kind, input.confirmLargeFile);
+      }
+      rightText = await readShelvedText(
+        file.depotPath,
+        input.changelistId,
+        kind,
+        input.confirmLargeFile
+      );
+    }
+
+    return { file, leftLabel, rightLabel, leftText, rightText, kind };
+  }
+
   async function readLocalOrThrow(
     localPath: string | null | undefined,
     confirmLarge: boolean | undefined
@@ -339,6 +483,44 @@ export function createChangeService(options: ChangeServiceOptions): ChangeServic
     return p4.printBuffer(depotPath, revision);
   }
 
+  async function readShelvedText(
+    depotPath: string,
+    changelistId: string,
+    kind: DiffContentKind,
+    confirmLarge: boolean | undefined
+  ): Promise<string> {
+    if (kind === "csv" || kind === "tsv") {
+      const buf = await printShelvedBufferGuarded(depotPath, changelistId, confirmLarge);
+      return decodeTextBuffer(buf);
+    }
+    // Plain text — still guard size before printing.
+    const size = await p4.getShelvedFileSize(depotPath, changelistId);
+    if (size !== null && size > largeFileThreshold && !confirmLarge) {
+      throw new AppError(
+        "LARGE_FILE_REQUIRES_CONFIRMATION",
+        `${depotPath} exceeds ${largeFileThreshold} bytes. Confirmation required.`,
+        String(size)
+      );
+    }
+    return p4.printShelved(depotPath, changelistId);
+  }
+
+  async function printShelvedBufferGuarded(
+    depotPath: string,
+    changelistId: string,
+    confirmLarge: boolean | undefined
+  ): Promise<Buffer> {
+    const size = await p4.getShelvedFileSize(depotPath, changelistId);
+    if (size !== null && size > largeFileThreshold && !confirmLarge) {
+      throw new AppError(
+        "LARGE_FILE_REQUIRES_CONFIRMATION",
+        `${depotPath} exceeds ${largeFileThreshold} bytes. Confirmation required.`,
+        String(size)
+      );
+    }
+    return p4.printShelvedBuffer(depotPath, changelistId);
+  }
+
   function buildXlsxPair(
     file: ChangeFile,
     leftLabel: string,
@@ -360,6 +542,7 @@ export function createChangeService(options: ChangeServiceOptions): ChangeServic
   return {
     listPendingChanges,
     listHistoryChanges,
+    listShelvedChanges,
     loadChangelist,
     loadFileContentPair,
     getEnvironment,
@@ -384,6 +567,24 @@ function fileFromDescribe(f: ParsedDescribeFile): ChangeFile {
     if (!Number.isNaN(revNumber) && revNumber > 1) {
       file.oldRev = String(revNumber - 1);
     }
+  }
+  return file;
+}
+
+// In `p4 describe -S` output the revision printed next to a shelved file is the
+// base revision the shelve was made against (the "have" rev at shelve time),
+// not the new revision. So oldRev = revision (for non-add actions) and newRev
+// is intentionally left undefined — the right side is read via `@=<CL>`.
+function fileFromShelvedDescribe(f: ParsedDescribeFile): ChangeFile {
+  const action = (f.action ?? "").toLowerCase();
+  const file: ChangeFile = {
+    depotPath: f.depotPath,
+    action: f.action,
+    status: actionToStatus(f.action),
+    isText: true,
+  };
+  if (action !== "add" && action !== "branch" && action !== "move/add") {
+    file.oldRev = f.revision;
   }
   return file;
 }

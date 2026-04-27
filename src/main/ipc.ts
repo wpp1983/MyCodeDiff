@@ -33,6 +33,7 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
     "mycodediff:listPendingChanges": () => change.listPendingChanges(),
     "mycodediff:listHistoryChanges": (_e, input: ListHistoryChangesInput) =>
       change.listHistoryChanges(input),
+    "mycodediff:listShelvedChanges": () => change.listShelvedChanges(),
     "mycodediff:loadChangelist": (_e, input: LoadChangelistInput) =>
       change.loadChangelist(input),
     "mycodediff:loadFileContentPair": (_e, input: LoadFileContentPairInput) =>

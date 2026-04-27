@@ -29,12 +29,17 @@ export type P4Service = {
   getEnvironment(): Promise<P4Environment>;
   listPendingChanges(client?: string): Promise<ChangelistListItem[]>;
   listSubmittedChanges(depotPath: string, limit: number): Promise<ChangelistListItem[]>;
+  listShelvedChanges(user?: string): Promise<ChangelistListItem[]>;
   opened(changelistId: string): Promise<ParsedOpenedFile[]>;
   describe(changelistId: string): Promise<ParsedDescribe | null>;
+  describeShelved(changelistId: string): Promise<ParsedDescribe | null>;
   where(depotPath: string): Promise<string | null>;
   print(depotPath: string, revision?: string): Promise<string>;
   printBuffer(depotPath: string, revision?: string): Promise<Buffer>;
   getFileSize(depotPath: string, revision?: string): Promise<number | null>;
+  printShelved(depotPath: string, changelistId: string): Promise<string>;
+  printShelvedBuffer(depotPath: string, changelistId: string): Promise<Buffer>;
+  getShelvedFileSize(depotPath: string, changelistId: string): Promise<number | null>;
   getClientView(): Promise<P4ClientView>;
 };
 
@@ -166,6 +171,13 @@ export function createP4Service(options: P4ServiceOptions = {}): P4Service {
     return parseChangesOutput(result.stdout, "submitted");
   }
 
+  async function listShelvedChanges(user?: string): Promise<ChangelistListItem[]> {
+    const args = ["changes", "-s", "shelved", "-l"];
+    if (user) args.push("-u", user);
+    const result = await runChecked(args);
+    return parseChangesOutput(result.stdout, "shelved");
+  }
+
   async function opened(changelistId: string): Promise<ParsedOpenedFile[]> {
     const args = ["opened"];
     if (changelistId !== "default") args.push("-c", changelistId);
@@ -176,6 +188,11 @@ export function createP4Service(options: P4ServiceOptions = {}): P4Service {
 
   async function describe(changelistId: string): Promise<ParsedDescribe | null> {
     const result = await runChecked(["describe", "-s", changelistId]);
+    return parseDescribeOutput(result.stdout);
+  }
+
+  async function describeShelved(changelistId: string): Promise<ParsedDescribe | null> {
+    const result = await runChecked(["describe", "-S", "-s", changelistId]);
     return parseDescribeOutput(result.stdout);
   }
 
@@ -225,6 +242,49 @@ export function createP4Service(options: P4ServiceOptions = {}): P4Service {
     return Number.isFinite(n) ? n : null;
   }
 
+  async function printShelved(depotPath: string, changelistId: string): Promise<string> {
+    const target = `${depotPath}@=${changelistId}`;
+    const result = await runChecked(["print", "-q", target]);
+    return result.stdout;
+  }
+
+  async function printShelvedBuffer(
+    depotPath: string,
+    changelistId: string
+  ): Promise<Buffer> {
+    const target = `${depotPath}@=${changelistId}`;
+    const args = ["print", "-q", target];
+    const result = await bufferRunner(args);
+    if (result.exitCode !== 0) {
+      const authError = detectP4InfoError(result.stderr, "");
+      if (authError === "P4_AUTH_REQUIRED") {
+        throw new AppError(
+          "P4_AUTH_REQUIRED",
+          "P4 session expired or not logged in.",
+          result.stderr
+        );
+      }
+      throw new AppError(
+        "P4_COMMAND_FAILED",
+        `p4 ${args.join(" ")} failed with exit code ${result.exitCode}`,
+        result.stderr
+      );
+    }
+    return result.buffer;
+  }
+
+  async function getShelvedFileSize(
+    depotPath: string,
+    changelistId: string
+  ): Promise<number | null> {
+    const target = `${depotPath}@=${changelistId}`;
+    const result = await runChecked(["fstat", "-Ol", "-T", "fileSize", target]);
+    const match = result.stdout.match(/fileSize\s+(\d+)/);
+    if (!match || !match[1]) return null;
+    const n = parseInt(match[1], 10);
+    return Number.isFinite(n) ? n : null;
+  }
+
   async function getClientView(): Promise<P4ClientView> {
     const result = await runChecked(["client", "-o"]);
     return parseClientView(result.stdout);
@@ -235,12 +295,17 @@ export function createP4Service(options: P4ServiceOptions = {}): P4Service {
     getEnvironment,
     listPendingChanges,
     listSubmittedChanges,
+    listShelvedChanges,
     opened,
     describe,
+    describeShelved,
     where,
     print,
     printBuffer,
     getFileSize,
+    printShelved,
+    printShelvedBuffer,
+    getShelvedFileSize,
     getClientView,
   };
 }

@@ -125,7 +125,7 @@ export function PendingPage(props: PendingPageProps) {
           {store.state.selectedCl ? (
             <FileListView
               files={filteredFiles}
-              selectedDepotPath={store.state.selectedFile?.depotPath}
+              selectedFile={store.state.selectedFile}
               onSelect={(f) => void store.selectFile(f)}
             />
           ) : (

@@ -109,9 +109,13 @@ export function useChangeStore(api: MyCodeDiffApi | undefined): ChangeStoreApi {
         largeFilePending: null,
       }));
       try {
+        // A pending CL may include shelved files alongside workspace-opened
+        // files (P4V-style). Route shelved entries through the shelved kind so
+        // the main process can use the `@=<CL>` print syntax.
+        const effectiveKind: ChangeKind = file.shelved ? "shelved" : current.kind;
         const pair = await api.loadFileContentPair({
           changelistId: current.id,
-          kind: current.kind,
+          kind: effectiveKind,
           depotPath: file.depotPath,
           confirmLargeFile,
         });
