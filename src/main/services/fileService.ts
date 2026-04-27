@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import { AppError } from "@core/models/errors";
+import { decodeTextBuffer } from "./normalize/textDecode";
 
 export type FileReadResult = {
   text: string | null;
@@ -13,8 +14,14 @@ export type FileServiceOptions = {
   largeFileThresholdBytes?: number;
 };
 
+export type FileBufferReadResult = {
+  buffer: Buffer;
+  sizeBytes: number;
+};
+
 export type FileService = {
   readLocalFile(path: string, confirmLarge?: boolean): Promise<FileReadResult>;
+  readLocalBuffer(path: string, confirmLarge?: boolean): Promise<FileBufferReadResult>;
 };
 
 export function createFileService(options: FileServiceOptions = {}): FileService {
@@ -60,13 +67,50 @@ export function createFileService(options: FileServiceOptions = {}): FileService
     const binary = isBinary(buffer);
     if (binary) return { text: null, isBinary: true, sizeBytes: size };
     return {
-      text: decodeUtf8(buffer),
+      text: decodeTextBuffer(buffer),
       isBinary: false,
       sizeBytes: size,
     };
   }
 
-  return { readLocalFile };
+  async function readLocalBuffer(
+    path: string,
+    confirmLarge = false
+  ): Promise<FileBufferReadResult> {
+    let size = 0;
+    try {
+      const s = await stat(path);
+      size = s.size;
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code === "ENOENT") {
+        throw new AppError("FILE_NOT_FOUND", `Local file not found: ${path}`);
+      }
+      throw new AppError("UNKNOWN", `Unable to stat file: ${path}`, e.message);
+    }
+
+    if (size > threshold && !confirmLarge) {
+      throw new AppError(
+        "LARGE_FILE_REQUIRES_CONFIRMATION",
+        `File exceeds ${threshold} bytes. Confirmation required.`,
+        String(size)
+      );
+    }
+
+    let buffer: Buffer;
+    try {
+      buffer = await readFile(path);
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code === "ENOENT") {
+        throw new AppError("FILE_NOT_FOUND", `Local file not found: ${path}`);
+      }
+      throw new AppError("UNKNOWN", `Unable to read file: ${path}`, e.message);
+    }
+    return { buffer, sizeBytes: size };
+  }
+
+  return { readLocalFile, readLocalBuffer };
 }
 
 export function isBinary(buffer: Buffer): boolean {

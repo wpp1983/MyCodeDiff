@@ -21,7 +21,9 @@ export function PierreDiffView(props: PierreDiffViewProps) {
   const { pair, layout, showLineNumbers, ignoreWhitespace, contextLines } = props;
 
   const fileDiff = useMemo(() => {
-    const name = basename(pair.file.depotPath);
+    const baseName = basename(pair.file.depotPath);
+    // For xlsx, hint Pierre to use TSV highlighting on the normalized output.
+    const name = pair.kind === "xlsx-sheets" ? `${baseName}.tsv` : baseName;
     const leftText = pair.leftText ?? "";
     const rightText = pair.rightText ?? "";
     try {

@@ -2,7 +2,10 @@ import type {
   ChangeFile,
   ChangelistListItem,
   ChangelistSummary,
+  DiffContentKind,
   FileContentPair,
+  SheetPair,
+  SheetPayload,
 } from "@core/models/changeModels";
 import type {
   ListHistoryChangesInput,
@@ -19,6 +22,12 @@ import {
   isBinaryFileType,
   type ParsedDescribeFile,
 } from "@core/p4/p4Parsers";
+import { getDiffKind } from "@core/normalize/diffKind";
+import {
+  combineSheetsToText,
+  parseXlsxBuffer,
+} from "./normalize/xlsxNormalize";
+import { decodeTextBuffer } from "./normalize/textDecode";
 
 export type ChangeServiceOptions = {
   p4: P4Service;
@@ -37,10 +46,11 @@ export type ChangeService = {
 
 export function createChangeService(options: ChangeServiceOptions): ChangeService {
   const { p4 } = options;
+  const largeFileThreshold = options.largeFileThresholdBytes ?? 2 * 1024 * 1024;
   const fileService =
     options.fileService ??
     createFileService({
-      largeFileThresholdBytes: options.largeFileThresholdBytes,
+      largeFileThresholdBytes: largeFileThreshold,
     });
   const largeChangeThreshold = options.largeChangeFileCountThreshold ?? 500;
 
@@ -145,6 +155,7 @@ export function createChangeService(options: ChangeServiceOptions): ChangeServic
         `File ${input.depotPath} not found in CL ${input.changelistId}`
       );
     }
+    const kind = getDiffKind(match.depotPath);
     const file: ChangeFile = {
       depotPath: match.depotPath,
       status: actionToStatus(match.action),
@@ -153,7 +164,7 @@ export function createChangeService(options: ChangeServiceOptions): ChangeServic
     if (match.action) file.action = match.action;
     if (match.revision) file.oldRev = match.revision;
 
-    if (!file.isText) {
+    if (!file.isText && kind !== "xlsx-sheets") {
       throw new AppError("BINARY_FILE", `${match.depotPath} is binary`);
     }
 
@@ -164,19 +175,33 @@ export function createChangeService(options: ChangeServiceOptions): ChangeServic
     const leftLabel = action === "add" ? "(new)" : `${match.depotPath}#have`;
     const rightLabel = action === "delete" ? "(deleted)" : localPath ?? match.depotPath;
 
+    if (kind === "xlsx-sheets") {
+      const leftSheets =
+        action === "add" || action === "branch" || action === "move/add"
+          ? []
+          : parseXlsxBuffer(
+              await printBufferGuarded(match.depotPath, "have", input.confirmLargeFile)
+            );
+      const rightSheets =
+        action === "delete" || action === "move/delete" || action === "purge"
+          ? []
+          : parseXlsxBuffer(await readLocalBufferOrThrow(localPath, input.confirmLargeFile));
+      return buildXlsxPair(file, leftLabel, rightLabel, leftSheets, rightSheets);
+    }
+
     let leftText: string | null = null;
     let rightText: string | null = null;
 
     if (action === "add" || action === "branch" || action === "move/add") {
       rightText = await readLocalOrThrow(localPath, input.confirmLargeFile);
     } else if (action === "delete" || action === "move/delete" || action === "purge") {
-      leftText = await p4.print(match.depotPath, "have");
+      leftText = await readDepotText(match.depotPath, "have", kind, input.confirmLargeFile);
     } else {
-      leftText = await p4.print(match.depotPath, "have");
+      leftText = await readDepotText(match.depotPath, "have", kind, input.confirmLargeFile);
       rightText = await readLocalOrThrow(localPath, input.confirmLargeFile);
     }
 
-    return { file, leftLabel, rightLabel, leftText, rightText };
+    return { file, leftLabel, rightLabel, leftText, rightText, kind };
   }
 
   async function loadSubmittedContent(
@@ -194,32 +219,59 @@ export function createChangeService(options: ChangeServiceOptions): ChangeServic
       );
     }
     const file = fileFromDescribe(match);
-    if (!file.isText) {
+    const kind = getDiffKind(file.depotPath);
+    if (!file.isText && kind !== "xlsx-sheets") {
       throw new AppError("BINARY_FILE", `${file.depotPath} is binary`);
     }
 
     const action = (file.action ?? "").toLowerCase();
-    let leftText: string | null = null;
-    let rightText: string | null = null;
     let leftLabel = "";
     let rightLabel = "";
 
     if (action === "add" || action === "branch" || action === "move/add") {
-      rightText = await p4.print(file.depotPath, file.newRev);
       leftLabel = "(new)";
       rightLabel = `${file.depotPath}#${file.newRev}`;
     } else if (action === "delete" || action === "move/delete" || action === "purge") {
-      leftText = file.oldRev ? await p4.print(file.depotPath, file.oldRev) : null;
       leftLabel = `${file.depotPath}#${file.oldRev ?? ""}`;
       rightLabel = "(deleted)";
     } else {
-      if (file.oldRev) leftText = await p4.print(file.depotPath, file.oldRev);
-      rightText = await p4.print(file.depotPath, file.newRev);
       leftLabel = `${file.depotPath}#${file.oldRev ?? ""}`;
       rightLabel = `${file.depotPath}#${file.newRev}`;
     }
 
-    return { file, leftLabel, rightLabel, leftText, rightText };
+    if (kind === "xlsx-sheets") {
+      const leftSheets =
+        action === "add" || action === "branch" || action === "move/add" || !file.oldRev
+          ? []
+          : parseXlsxBuffer(
+              await printBufferGuarded(file.depotPath, file.oldRev, input.confirmLargeFile)
+            );
+      const rightSheets =
+        action === "delete" || action === "move/delete" || action === "purge"
+          ? []
+          : parseXlsxBuffer(
+              await printBufferGuarded(file.depotPath, file.newRev, input.confirmLargeFile)
+            );
+      return buildXlsxPair(file, leftLabel, rightLabel, leftSheets, rightSheets);
+    }
+
+    let leftText: string | null = null;
+    let rightText: string | null = null;
+
+    if (action === "add" || action === "branch" || action === "move/add") {
+      rightText = await readDepotText(file.depotPath, file.newRev, kind, input.confirmLargeFile);
+    } else if (action === "delete" || action === "move/delete" || action === "purge") {
+      leftText = file.oldRev
+        ? await readDepotText(file.depotPath, file.oldRev, kind, input.confirmLargeFile)
+        : null;
+    } else {
+      if (file.oldRev) {
+        leftText = await readDepotText(file.depotPath, file.oldRev, kind, input.confirmLargeFile);
+      }
+      rightText = await readDepotText(file.depotPath, file.newRev, kind, input.confirmLargeFile);
+    }
+
+    return { file, leftLabel, rightLabel, leftText, rightText, kind };
   }
 
   async function readLocalOrThrow(
@@ -230,6 +282,58 @@ export function createChangeService(options: ChangeServiceOptions): ChangeServic
     const res = await fileService.readLocalFile(localPath, confirmLarge);
     if (res.isBinary) throw new AppError("BINARY_FILE", `${localPath} is binary`);
     return res.text ?? "";
+  }
+
+  async function readLocalBufferOrThrow(
+    localPath: string | null | undefined,
+    confirmLarge: boolean | undefined
+  ): Promise<Buffer> {
+    if (!localPath) throw new AppError("FILE_NOT_FOUND", "Local path unresolved");
+    const res = await fileService.readLocalBuffer(localPath, confirmLarge);
+    return res.buffer;
+  }
+
+  async function readDepotText(
+    depotPath: string,
+    revision: string | undefined,
+    kind: DiffContentKind,
+    confirmLarge: boolean | undefined
+  ): Promise<string> {
+    if (kind === "csv" || kind === "tsv") {
+      const buf = await printBufferGuarded(depotPath, revision, confirmLarge);
+      return decodeTextBuffer(buf);
+    }
+    return p4.print(depotPath, revision);
+  }
+
+  async function printBufferGuarded(
+    depotPath: string,
+    revision: string | undefined,
+    confirmLarge: boolean | undefined
+  ): Promise<Buffer> {
+    const size = await p4.getFileSize(depotPath, revision);
+    if (size !== null && size > largeFileThreshold && !confirmLarge) {
+      throw new AppError(
+        "LARGE_FILE_REQUIRES_CONFIRMATION",
+        `${depotPath} exceeds ${largeFileThreshold} bytes. Confirmation required.`,
+        String(size)
+      );
+    }
+    return p4.printBuffer(depotPath, revision);
+  }
+
+  function buildXlsxPair(
+    file: ChangeFile,
+    leftLabel: string,
+    rightLabel: string,
+    leftSheets: SheetPayload[],
+    rightSheets: SheetPayload[]
+  ): FileContentPair {
+    const sheets: SheetPair = { left: leftSheets, right: rightSheets };
+    const leftText = leftSheets.length > 0 ? combineSheetsToText(leftSheets) : null;
+    const rightText = rightSheets.length > 0 ? combineSheetsToText(rightSheets) : null;
+    const kind: DiffContentKind = "xlsx-sheets";
+    return { file, leftLabel, rightLabel, leftText, rightText, kind, sheets };
   }
 
   async function getEnvironment(): Promise<P4Environment> {

@@ -20,6 +20,10 @@ import type { ChangelistListItem } from "@core/models/changeModels";
 import type { P4Environment } from "@core/ipc/contract";
 import { AppError } from "@core/models/errors";
 
+export type P4BufferRunner = (
+  args: string[]
+) => Promise<{ buffer: Buffer; stderr: string; exitCode: number }>;
+
 export type P4Service = {
   runRaw: P4CommandRunner;
   getEnvironment(): Promise<P4Environment>;
@@ -29,11 +33,14 @@ export type P4Service = {
   describe(changelistId: string): Promise<ParsedDescribe | null>;
   where(depotPath: string): Promise<string | null>;
   print(depotPath: string, revision?: string): Promise<string>;
+  printBuffer(depotPath: string, revision?: string): Promise<Buffer>;
+  getFileSize(depotPath: string, revision?: string): Promise<number | null>;
   getClientView(): Promise<P4ClientView>;
 };
 
 export type P4ServiceOptions = {
   runner?: P4CommandRunner;
+  bufferRunner?: P4BufferRunner;
   p4Path?: string;
   env?: NodeJS.ProcessEnv;
   getClientOverride?: () => string | undefined;
@@ -48,6 +55,14 @@ export function createP4Service(options: P4ServiceOptions = {}): P4Service {
       const env: NodeJS.ProcessEnv = { ...(options.env ?? {}) };
       if (override && override.trim()) env["P4CLIENT"] = override.trim();
       return spawnP4(p4Path, args, env);
+    });
+  const bufferRunner: P4BufferRunner =
+    options.bufferRunner ??
+    ((args) => {
+      const override = options.getClientOverride?.();
+      const env: NodeJS.ProcessEnv = { ...(options.env ?? {}) };
+      if (override && override.trim()) env["P4CLIENT"] = override.trim();
+      return spawnP4Buffer(p4Path, args, env);
     });
 
   async function runChecked(args: string[]): Promise<P4CommandResult> {
@@ -176,6 +191,40 @@ export function createP4Service(options: P4ServiceOptions = {}): P4Service {
     return result.stdout;
   }
 
+  async function printBuffer(depotPath: string, revision?: string): Promise<Buffer> {
+    const target = revision ? `${depotPath}#${revision}` : depotPath;
+    const args = ["print", "-q", target];
+    const result = await bufferRunner(args);
+    if (result.exitCode !== 0) {
+      const authError = detectP4InfoError(result.stderr, "");
+      if (authError === "P4_AUTH_REQUIRED") {
+        throw new AppError(
+          "P4_AUTH_REQUIRED",
+          "P4 session expired or not logged in.",
+          result.stderr
+        );
+      }
+      throw new AppError(
+        "P4_COMMAND_FAILED",
+        `p4 ${args.join(" ")} failed with exit code ${result.exitCode}`,
+        result.stderr
+      );
+    }
+    return result.buffer;
+  }
+
+  async function getFileSize(
+    depotPath: string,
+    revision?: string
+  ): Promise<number | null> {
+    const target = revision ? `${depotPath}#${revision}` : depotPath;
+    const result = await runChecked(["fstat", "-Ol", "-T", "fileSize", target]);
+    const match = result.stdout.match(/fileSize\s+(\d+)/);
+    if (!match || !match[1]) return null;
+    const n = parseInt(match[1], 10);
+    return Number.isFinite(n) ? n : null;
+  }
+
   async function getClientView(): Promise<P4ClientView> {
     const result = await runChecked(["client", "-o"]);
     return parseClientView(result.stdout);
@@ -190,6 +239,8 @@ export function createP4Service(options: P4ServiceOptions = {}): P4Service {
     describe,
     where,
     print,
+    printBuffer,
+    getFileSize,
     getClientView,
   };
 }
@@ -225,6 +276,34 @@ function spawnP4(
     child.once("error", reject);
     child.once("close", (code) => {
       resolve({ stdout, stderr, exitCode: code ?? -1 });
+    });
+  });
+}
+
+function spawnP4Buffer(
+  p4Path: string,
+  args: string[],
+  extraEnv?: NodeJS.ProcessEnv
+): Promise<{ buffer: Buffer; stderr: string; exitCode: number }> {
+  return new Promise((resolve, reject) => {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      ...extraEnv,
+      SystemRoot: process.env["SystemRoot"] ?? "C:\\Windows",
+      WINDIR: process.env["WINDIR"] ?? "C:\\Windows",
+    };
+    const child = spawn(p4Path, args, { env, windowsHide: true });
+    const chunks: Buffer[] = [];
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      resolve({ buffer: Buffer.concat(chunks), stderr, exitCode: code ?? -1 });
     });
   });
 }

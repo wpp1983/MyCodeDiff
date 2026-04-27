@@ -17,8 +17,10 @@
   "dependencies": {
     "@pierre/diffs": "1.1.19",
     "@pierre/trees": "1.0.0-beta.3",
+    "iconv-lite": "^0.7.2",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3"
+    "react-dom": "^19.2.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/react": "^19.2.7",

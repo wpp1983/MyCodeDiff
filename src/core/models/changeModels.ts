@@ -43,10 +43,24 @@ export type ChangelistSummary = {
   largeChange?: boolean;
 };
 
+export type DiffContentKind = "text" | "csv" | "tsv" | "xlsx-sheets";
+
+export type SheetPayload = {
+  name: string;
+  tsv: string;
+};
+
+export type SheetPair = {
+  left: SheetPayload[];
+  right: SheetPayload[];
+};
+
 export type FileContentPair = {
   file: ChangeFile;
   leftLabel: string;
   rightLabel: string;
   leftText: string | null;
   rightText: string | null;
+  kind: DiffContentKind;
+  sheets?: SheetPair;
 };
