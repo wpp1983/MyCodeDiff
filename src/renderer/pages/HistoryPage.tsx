@@ -23,9 +23,15 @@ export function HistoryPage(props: HistoryPageProps) {
   const [clInput, setClInput] = useState("");
   const { leftWidth, topHeight, adjustLeft, adjustTop } = usePaneSizes();
 
-  useEffect(() => {
+  const refresh = (): void => {
     if (!api) return;
-    void store.loadList(() => api.listHistoryChanges({ limit: props.config.historyLimit }));
+    void store.loadList(() =>
+      api.listHistoryChanges({ limit: props.config.historyLimit })
+    );
+  };
+
+  useEffect(() => {
+    refresh();
   }, [api, props.config.historyLimit]);
 
   const filteredFiles = useMemo(() => {
@@ -53,7 +59,16 @@ export function HistoryPage(props: HistoryPageProps) {
     <>
       <div className="left-pane" style={{ width: leftWidth }}>
         <section className="left-top" style={{ height: topHeight }}>
-          <h3>History CLs</h3>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h3 style={{ margin: 0, flex: 1 }}>History CLs</h3>
+            <button
+              onClick={refresh}
+              disabled={store.state.loadingList}
+              title="Refresh p4 data"
+            >
+              {store.state.loadingList ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
           <div style={{ marginBottom: 8, display: "flex", gap: 4 }}>
             <input
               type="text"

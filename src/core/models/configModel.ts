@@ -20,7 +20,7 @@ export const defaultConfig: AppConfig = {
   defaultDiffView: "side-by-side",
   historyLimit: 50,
   contextLines: 3,
-  ignoreWhitespace: false,
+  ignoreWhitespace: true,
   hideUnchanged: false,
   showLineNumbers: true,
   theme: "system",

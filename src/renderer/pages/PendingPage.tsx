@@ -22,9 +22,13 @@ export function PendingPage(props: PendingPageProps) {
   );
   const { leftWidth, topHeight, adjustLeft, adjustTop } = usePaneSizes();
 
-  useEffect(() => {
+  const refresh = (): void => {
     if (!api) return;
     void store.loadList(() => api.listPendingChanges());
+  };
+
+  useEffect(() => {
+    refresh();
   }, [api]);
 
   const filteredFiles = useMemo(() => {
@@ -46,7 +50,16 @@ export function PendingPage(props: PendingPageProps) {
     <>
       <div className="left-pane" style={{ width: leftWidth }}>
         <section className="left-top" style={{ height: topHeight }}>
-          <h3>Pending CLs</h3>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h3 style={{ margin: 0, flex: 1 }}>Pending CLs</h3>
+            <button
+              onClick={refresh}
+              disabled={store.state.loadingList}
+              title="Refresh p4 data"
+            >
+              {store.state.loadingList ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
           {store.state.listError ? (
             <div className="error-banner">{store.state.listError}</div>
           ) : null}
