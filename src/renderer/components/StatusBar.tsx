@@ -10,20 +10,41 @@ export function StatusBar() {
     void api.getP4Environment().then(setEnv).catch(() => setEnv(null));
   }, []);
 
+  const ok = !!(env && env.available);
+
   return (
     <div className="status-bar">
-      {env && env.available ? (
+      <div className="item">
+        <span className={`conn-dot${ok ? "" : " err"}`} />
+        <span className={ok ? "sync-ok" : "sync-err"}>
+          {ok ? "Connected" : "Disconnected"}
+        </span>
+      </div>
+      {ok ? (
         <>
-          <span>user: {env.user ?? "?"}</span>
-          <span>client: {env.client ?? "?"}</span>
-          <span>depot: {env.depotPaths[0] ?? "(none)"}</span>
+          <div className="item">
+            <span className="lbl">user</span>
+            <span className="val">{env!.user ?? "?"}</span>
+          </div>
+          <div className="item">
+            <span className="lbl">client</span>
+            <span className="val">{env!.client ?? "?"}</span>
+          </div>
+          <div className="item">
+            <span className="lbl">depot</span>
+            <span className="val">{env!.depotPaths[0] ?? "(none)"}</span>
+          </div>
         </>
       ) : (
-        <span>
-          P4 status: {env?.errorCode ?? "unknown"}
-          {env?.errorMessage ? ` (${env.errorMessage.split("\n")[0]})` : ""}
-        </span>
+        <div className="item">
+          <span className="lbl">P4</span>
+          <span className="val">
+            {env?.errorCode ?? "unknown"}
+            {env?.errorMessage ? ` — ${env.errorMessage.split("\n")[0]}` : ""}
+          </span>
+        </div>
       )}
+      <div className="spacer" />
     </div>
   );
 }

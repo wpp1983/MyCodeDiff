@@ -16,26 +16,29 @@ type Row = {
 function splitDepotPath(depotPath: string): { name: string; folder: string } {
   const idx = depotPath.lastIndexOf("/");
   if (idx < 0) return { name: depotPath, folder: "" };
-  return { name: depotPath.slice(idx + 1), folder: depotPath.slice(0, idx) };
+  return { name: depotPath.slice(idx + 1), folder: depotPath.slice(0, idx + 1) };
 }
 
-function statusGlyph(status: FileChangeStatus): string {
+function iconKindFor(status: FileChangeStatus): {
+  kind: "add" | "del" | "mod" | "move" | "confl" | "bin" | "unc";
+  letter: string;
+} {
   switch (status) {
     case "added":
-      return "+";
+      return { kind: "add", letter: "A" };
     case "deleted":
-      return "−";
+      return { kind: "del", letter: "D" };
     case "modified":
-      return "✎";
+      return { kind: "mod", letter: "M" };
     case "renamed":
     case "moved":
-      return "→";
+      return { kind: "move", letter: "R" };
     case "binary":
-      return "▣";
+      return { kind: "bin", letter: "B" };
     case "unchanged":
-      return "·";
+      return { kind: "unc", letter: "·" };
     default:
-      return "?";
+      return { kind: "mod", letter: "?" };
   }
 }
 
@@ -49,57 +52,39 @@ export function FileListView(props: FileListViewProps) {
     });
   }, [files]);
 
+  if (rows.length === 0) {
+    return <div className="file-list-empty">(no files)</div>;
+  }
+
   return (
-    <div className="file-list">
-      <table className="file-list-table">
-        <thead>
-          <tr>
-            <th className="col-name">name</th>
-            <th className="col-rev">Revision</th>
-            <th className="col-action">Action</th>
-            <th className="col-ftype">FileType</th>
-            <th className="col-folder">In Folder</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={5} className="file-list-empty">
-                (no files)
-              </td>
-            </tr>
-          ) : (
-            rows.map(({ file, name, folder }) => {
-              const selected = file.depotPath === selectedDepotPath;
-              const rev = file.newRev ?? file.oldRev ?? "";
-              const action = file.action ?? "";
-              const fileType = file.fileType ?? "";
-              return (
-                <tr
-                  key={file.depotPath}
-                  className={selected ? "selected" : ""}
-                  onClick={() => onSelect?.(file)}
-                  title={file.depotPath}
-                >
-                  <td className="col-name">
-                    <span
-                      className={`file-status-icon status-${file.status}`}
-                      title={file.status}
-                    >
-                      {statusGlyph(file.status)}
-                    </span>
-                    <span className="file-name">{name}</span>
-                  </td>
-                  <td className="col-rev">{rev}</td>
-                  <td className="col-action">{action}</td>
-                  <td className="col-ftype">{fileType}</td>
-                  <td className="col-folder">{folder}</td>
-                </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
+    <div className="file-list" role="listbox">
+      {rows.map(({ file, name, folder }) => {
+        const selected = file.depotPath === selectedDepotPath;
+        const ic = iconKindFor(file.status);
+        const isConflict = (file.action ?? "").toLowerCase().includes("conflict");
+        return (
+          <div
+            key={file.depotPath}
+            role="option"
+            aria-selected={selected}
+            className={`file-row${selected ? " selected" : ""}`}
+            onClick={() => onSelect?.(file)}
+            title={file.depotPath}
+          >
+            <div className={`file-icon ${ic.kind}`}>{ic.letter}</div>
+            <div className="file-path">
+              <span className="dir">{folder}</span>
+              <span className="basename">{name}</span>
+            </div>
+            {isConflict ? <span className="file-flag">conflict</span> : null}
+            {file.action ? (
+              <div className="diff-stat" aria-hidden>
+                <span style={{ color: "var(--fg-3)" }}>{file.action}</span>
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }

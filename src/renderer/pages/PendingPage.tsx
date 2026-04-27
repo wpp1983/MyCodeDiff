@@ -20,6 +20,7 @@ export function PendingPage(props: PendingPageProps) {
   const [statusFilter, setStatusFilter] = useState<Set<FileChangeStatus>>(
     () => new Set()
   );
+  const [clFilter, setClFilter] = useState("");
   const { leftWidth, topHeight, adjustLeft, adjustTop } = usePaneSizes();
 
   const refresh = (): void => {
@@ -50,15 +51,45 @@ export function PendingPage(props: PendingPageProps) {
     <>
       <div className="left-pane" style={{ width: leftWidth }}>
         <section className="left-top" style={{ height: topHeight }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <h3 style={{ margin: 0, flex: 1 }}>Pending CLs</h3>
+          <div className="pane-head">
+            <span className="pane-title">Pending CLs</span>
+            <div className="spacer" />
+            <span className="badge">{store.state.items.length}</span>
             <button
+              type="button"
+              className="icon-btn"
               onClick={refresh}
               disabled={store.state.loadingList}
               title="Refresh p4 data"
+              aria-label="Refresh"
             >
-              {store.state.loadingList ? "Refreshing..." : "Refresh"}
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={
+                  store.state.loadingList
+                    ? { animation: "spin 1s linear infinite" }
+                    : undefined
+                }
+              >
+                <path d="M21 12a9 9 0 1 1-3-6.7" />
+                <polyline points="21 4 21 10 15 10" />
+              </svg>
             </button>
+          </div>
+          <div className="pane-search-wrap">
+            <input
+              className="pane-search"
+              placeholder="Filter changelists…"
+              value={clFilter}
+              onChange={(e) => setClFilter(e.target.value)}
+            />
           </div>
           {store.state.listError ? (
             <div className="error-banner">{store.state.listError}</div>
@@ -67,11 +98,27 @@ export function PendingPage(props: PendingPageProps) {
             items={store.state.items}
             selectedId={store.state.selectedCl?.id ?? null}
             onSelect={(id) => void store.selectCl(id, "pending")}
+            filter={clFilter}
           />
         </section>
         <Splitter direction="horizontal" onResize={adjustTop} />
         <section className="left-bottom">
-          <h3>Files</h3>
+          <div className="pane-head">
+            <span className="pane-title">
+              Files{" "}
+              {store.state.selectedCl ? (
+                <span className="pane-head-sub">
+                  in CL {store.state.selectedCl.id}
+                </span>
+              ) : null}
+            </span>
+            <div className="spacer" />
+            {store.state.selectedCl ? (
+              <span className="badge">
+                {store.state.selectedCl.files.length}
+              </span>
+            ) : null}
+          </div>
           {store.state.changeError ? (
             <div className="error-banner">{store.state.changeError}</div>
           ) : null}
@@ -82,7 +129,7 @@ export function PendingPage(props: PendingPageProps) {
               onSelect={(f) => void store.selectFile(f)}
             />
           ) : (
-            <div>Select a CL to view files</div>
+            <div className="file-list-empty">Select a CL to view files</div>
           )}
         </section>
       </div>

@@ -42,12 +42,14 @@ export function PierreDiffView(props: PierreDiffViewProps) {
   }
 
   return (
-    <FileDiff
-      fileDiff={fileDiff}
-      options={{
-        diffStyle: layout === "unified" ? "unified" : "split",
-        disableLineNumbers: !showLineNumbers,
-      }}
-    />
+    <div className="diff-host">
+      <FileDiff
+        fileDiff={fileDiff}
+        options={{
+          diffStyle: layout === "unified" ? "unified" : "split",
+          disableLineNumbers: !showLineNumbers,
+        }}
+      />
+    </div>
   );
 }
