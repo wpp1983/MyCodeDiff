@@ -21,6 +21,7 @@ import {
   actionToStatus,
   isBinaryFileType,
   type ParsedDescribeFile,
+  type ParsedOpenedFile,
 } from "@core/p4/p4Parsers";
 import { getDiffKind } from "@core/normalize/diffKind";
 import {
@@ -65,7 +66,23 @@ export function createChangeService(options: ChangeServiceOptions): ChangeServic
     if (!env.client) {
       throw new AppError("P4_CLIENT_NOT_FOUND", "No client in p4 info output.");
     }
-    return p4.listPendingChanges(env.client);
+    const numbered = await p4.listPendingChanges(env.client);
+    let defaultOpened: ParsedOpenedFile[] = [];
+    try {
+      defaultOpened = await p4.opened("default");
+    } catch (err) {
+      console.warn("[changeService] p4 opened default failed:", err);
+      defaultOpened = [];
+    }
+    if (defaultOpened.length === 0) return numbered;
+    const defaultItem: ChangelistListItem = {
+      id: "default",
+      kind: "pending",
+      client: env.client,
+      description: "default",
+      fileCount: defaultOpened.length,
+    };
+    return [defaultItem, ...numbered];
   }
 
   async function listHistoryChanges(

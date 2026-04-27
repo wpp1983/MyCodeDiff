@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 
+export type AppPageKey = "pending" | "history" | "settings";
+
 export type AppTabsProps = {
-  active: "pending" | "history";
-  onChange: (next: "pending" | "history") => void;
+  active: AppPageKey;
+  onChange: (next: AppPageKey) => void;
   defaultClient: string;
   onDefaultClientChange: (next: string) => void | Promise<void>;
   effectiveClient?: string;
@@ -62,6 +64,14 @@ export function AppTabs(props: AppTabsProps) {
           Clear
         </button>
       ) : null}
+      <button
+        type="button"
+        className={props.active === "settings" ? "active" : ""}
+        onClick={() => props.onChange("settings")}
+        title="Settings"
+      >
+        Settings
+      </button>
     </div>
   );
 }

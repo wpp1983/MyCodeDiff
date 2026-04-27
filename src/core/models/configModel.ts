@@ -11,6 +11,8 @@ export type AppConfig = {
   theme: "system" | "light" | "dark";
   largeFileThresholdBytes: number;
   largeChangeFileCountThreshold: number;
+  diffFontFamily: string;
+  diffFontSize: number;
 };
 
 export const defaultConfig: AppConfig = {
@@ -26,6 +28,8 @@ export const defaultConfig: AppConfig = {
   theme: "system",
   largeFileThresholdBytes: 2 * 1024 * 1024,
   largeChangeFileCountThreshold: 500,
+  diffFontFamily: "",
+  diffFontSize: 13,
 };
 
 export function mergeConfig(
@@ -39,6 +43,7 @@ export function mergeConfig(
     if (!(key in defaultConfig)) continue;
     const defaultValue = (defaultConfig as any)[key];
     if (typeof defaultValue !== typeof value) continue;
+    if (typeof value === "number" && !Number.isFinite(value)) continue;
     (next as any)[key] = value;
   }
   return next;

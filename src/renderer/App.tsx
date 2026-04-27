@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { AppTabs } from "./components/AppTabs";
 import { PendingPage } from "./pages/PendingPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { StatusBar } from "./components/StatusBar";
 import type { AppConfig } from "@core/models/configModel";
 import { defaultConfig } from "@core/models/configModel";
 
-type PageKey = "pending" | "history";
+type PageKey = "pending" | "history" | "settings";
 
 export function App() {
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
@@ -32,6 +33,21 @@ export function App() {
       .catch(() => setEffectiveClient(undefined));
   }, [config.defaultClient, envReloadTick]);
 
+  // Apply diff font config as CSS variables consumed by @pierre/diffs.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (config.diffFontFamily) {
+      root.style.setProperty("--diffs-font-family", config.diffFontFamily);
+    } else {
+      root.style.removeProperty("--diffs-font-family");
+    }
+    if (config.diffFontSize && config.diffFontSize > 0) {
+      root.style.setProperty("--diffs-font-size", `${config.diffFontSize}px`);
+    } else {
+      root.style.removeProperty("--diffs-font-size");
+    }
+  }, [config.diffFontFamily, config.diffFontSize]);
+
   const handleDefaultClientChange = async (next: string): Promise<void> => {
     const api = window.mycodediff;
     if (!api) return;
@@ -56,12 +72,14 @@ export function App() {
             config={config}
             onConfigChange={setConfig}
           />
-        ) : (
+        ) : page === "history" ? (
           <HistoryPage
             key={`h-${config.defaultClient}`}
             config={config}
             onConfigChange={setConfig}
           />
+        ) : (
+          <SettingsPage config={config} onConfigChange={setConfig} />
         )}
       </div>
       <StatusBar key={`sb-${config.defaultClient}-${envReloadTick}`} />

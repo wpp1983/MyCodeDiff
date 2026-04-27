@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, session } from "electron";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerIpcHandlers } from "./ipc";
@@ -36,6 +36,19 @@ async function createWindow(): Promise<void> {
 
 app.whenReady().then(async () => {
   registerIpcHandlers(ipcMain);
+
+  // Allow renderer to use Local Font Access API (queryLocalFonts) for the
+  // settings page font picker.
+  session.defaultSession.setPermissionRequestHandler(
+    (_wc, permission, callback) => {
+      if ((permission as string) === "local-fonts") {
+        callback(true);
+        return;
+      }
+      callback(false);
+    }
+  );
+
   await createWindow();
 
   app.on("activate", () => {
