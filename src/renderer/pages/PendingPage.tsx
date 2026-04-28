@@ -4,6 +4,7 @@ import { DiffToolbar } from "../components/DiffToolbar";
 import { PierreDiffView } from "../components/PierreDiffView";
 import { FileListView } from "../components/FileListView";
 import { Splitter } from "../components/Splitter";
+import { SubmitConfirmModal } from "../components/SubmitConfirmModal";
 import { filterFiles, useChangeStore } from "../state/changeStore";
 import { usePaneSizes } from "../state/paneSizes";
 import type { AppConfig } from "@core/models/configModel";
@@ -21,11 +22,56 @@ export function PendingPage(props: PendingPageProps) {
     () => new Set()
   );
   const [clFilter, setClFilter] = useState("");
+  const [submitOpen, setSubmitOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitNotice, setSubmitNotice] = useState<string | null>(null);
   const { leftWidth, topHeight, adjustLeft, adjustTop } = usePaneSizes();
 
   const refresh = (): void => {
     if (!api) return;
     void store.loadList(() => api.listPendingChanges());
+  };
+
+  const selectedCl = store.state.selectedCl;
+  const shelvedCount = useMemo(
+    () => selectedCl?.files.filter((f) => f.shelved).length ?? 0,
+    [selectedCl]
+  );
+  const openedCount = useMemo(
+    () => selectedCl?.files.filter((f) => !f.shelved).length ?? 0,
+    [selectedCl]
+  );
+  const canSubmit =
+    !!selectedCl &&
+    selectedCl.kind === "pending" &&
+    selectedCl.id !== "default" &&
+    openedCount > 0 &&
+    shelvedCount === 0;
+  const submitDisabledReason = !selectedCl
+    ? "Select a numbered pending CL to submit"
+    : selectedCl.id === "default"
+      ? "Default CL cannot be submitted — move files into a numbered CL first"
+      : openedCount === 0
+        ? "CL has no opened files to submit"
+        : shelvedCount > 0
+          ? "CL contains shelved files — unshelve them before submitting"
+          : "";
+
+  const onSubmitConfirmed = async (): Promise<void> => {
+    if (!api || !selectedCl) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const res = await api.submitChange({ changelistId: selectedCl.id });
+      setSubmitOpen(false);
+      setSubmitNotice(`Submitted as CL ${res.submittedChangeId}`);
+      refresh();
+    } catch (err) {
+      setSubmitError(formatSubmitError(err));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   useEffect(() => {
@@ -106,19 +152,57 @@ export function PendingPage(props: PendingPageProps) {
           <div className="pane-head">
             <span className="pane-title">
               Files{" "}
-              {store.state.selectedCl ? (
-                <span className="pane-head-sub">
-                  in CL {store.state.selectedCl.id}
-                </span>
+              {selectedCl ? (
+                <span className="pane-head-sub">in CL {selectedCl.id}</span>
               ) : null}
             </span>
             <div className="spacer" />
-            {store.state.selectedCl ? (
-              <span className="badge">
-                {store.state.selectedCl.files.length}
-              </span>
+            {selectedCl ? (
+              <button
+                type="button"
+                className="icon-btn primary"
+                onClick={() => {
+                  setSubmitError(null);
+                  setSubmitOpen(true);
+                }}
+                disabled={!canSubmit}
+                title={canSubmit ? `Submit CL ${selectedCl.id}` : submitDisabledReason}
+                aria-label="Submit changelist"
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M5 12l5 5L20 7" />
+                </svg>
+                <span className="btn-label" style={{ marginLeft: 4 }}>
+                  Submit
+                </span>
+              </button>
+            ) : null}
+            {selectedCl ? (
+              <span className="badge">{selectedCl.files.length}</span>
             ) : null}
           </div>
+          {submitNotice ? (
+            <div className="error-banner" style={{ borderColor: "var(--accent-line)" }}>
+              {submitNotice}{" "}
+              <button
+                type="button"
+                className="btn ghost"
+                style={{ marginLeft: 8 }}
+                onClick={() => setSubmitNotice(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+          ) : null}
           {store.state.changeError ? (
             <div className="error-banner">{store.state.changeError}</div>
           ) : null}
@@ -175,6 +259,30 @@ export function PendingPage(props: PendingPageProps) {
           </div>
         )}
       </div>
+      <SubmitConfirmModal
+        open={submitOpen && !!selectedCl}
+        cl={selectedCl}
+        openedCount={openedCount}
+        submitting={submitting}
+        error={submitError}
+        onConfirm={() => void onSubmitConfirmed()}
+        onCancel={() => {
+          if (submitting) return;
+          setSubmitOpen(false);
+          setSubmitError(null);
+        }}
+      />
     </>
   );
+}
+
+function formatSubmitError(err: unknown): string {
+  if (!err) return "Submit failed";
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
 }

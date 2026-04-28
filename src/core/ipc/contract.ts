@@ -34,6 +34,14 @@ export type LoadFileContentPairInput = {
   confirmLargeFile?: boolean;
 };
 
+export type SubmitChangeInput = {
+  changelistId: string;
+};
+
+export type SubmitChangeResult = {
+  submittedChangeId: string;
+};
+
 export type MyCodeDiffApi = {
   getP4Environment(): Promise<P4Environment>;
   listPendingChanges(): Promise<ChangelistListItem[]>;
@@ -41,6 +49,7 @@ export type MyCodeDiffApi = {
   listShelvedChanges(): Promise<ChangelistListItem[]>;
   loadChangelist(input: LoadChangelistInput): Promise<ChangelistSummary>;
   loadFileContentPair(input: LoadFileContentPairInput): Promise<FileContentPair>;
+  submitChange(input: SubmitChangeInput): Promise<SubmitChangeResult>;
   getConfig(): Promise<AppConfig>;
   updateConfig(patch: Partial<AppConfig>): Promise<AppConfig>;
 };
@@ -52,5 +61,6 @@ export type MyCodeDiffIpcChannel =
   | "mycodediff:listShelvedChanges"
   | "mycodediff:loadChangelist"
   | "mycodediff:loadFileContentPair"
+  | "mycodediff:submitChange"
   | "mycodediff:getConfig"
   | "mycodediff:updateConfig";

@@ -41,6 +41,7 @@ export type P4Service = {
   printShelvedBuffer(depotPath: string, changelistId: string): Promise<Buffer>;
   getShelvedFileSize(depotPath: string, changelistId: string): Promise<number | null>;
   getClientView(): Promise<P4ClientView>;
+  submitChange(changelistId: string): Promise<{ submittedChangeId: string }>;
 };
 
 export type P4ServiceOptions = {
@@ -290,6 +291,51 @@ export function createP4Service(options: P4ServiceOptions = {}): P4Service {
     return parseClientView(result.stdout);
   }
 
+  async function submitChange(
+    changelistId: string
+  ): Promise<{ submittedChangeId: string }> {
+    const id = changelistId.trim();
+    if (!id || id === "default") {
+      throw new AppError(
+        "SUBMIT_FAILED",
+        "Default changelist cannot be submitted directly. Move files into a numbered changelist first."
+      );
+    }
+    const args = ["submit", "-c", id];
+    const result = await runner(args);
+    if (result.exitCode !== 0) {
+      const combined = `${result.stderr}\n${result.stdout}`;
+      const auth = detectP4InfoError(result.stderr, result.stdout);
+      if (auth === "P4_AUTH_REQUIRED") {
+        throw new AppError(
+          "P4_AUTH_REQUIRED",
+          "P4 session expired or not logged in.",
+          combined
+        );
+      }
+      if (/no files to submit/i.test(combined)) {
+        throw new AppError(
+          "SUBMIT_EMPTY_CHANGE",
+          `Changelist ${id} has no files to submit.`,
+          combined
+        );
+      }
+      if (/must (?:be )?resolved?|needs? resolve/i.test(combined)) {
+        throw new AppError(
+          "SUBMIT_NEEDS_RESOLVE",
+          `Changelist ${id} has files that must be resolved before submitting.`,
+          combined
+        );
+      }
+      throw new AppError(
+        "SUBMIT_FAILED",
+        `p4 submit -c ${id} failed with exit code ${result.exitCode}`,
+        combined
+      );
+    }
+    return { submittedChangeId: parseSubmittedChangeId(result.stdout, id) };
+  }
+
   return {
     runRaw: runner,
     getEnvironment,
@@ -307,7 +353,21 @@ export function createP4Service(options: P4ServiceOptions = {}): P4Service {
     printShelvedBuffer,
     getShelvedFileSize,
     getClientView,
+    submitChange,
   };
+}
+
+function parseSubmittedChangeId(stdout: string, fallback: string): string {
+  // Typical patterns produced by `p4 submit`:
+  //   "Change 1234 submitted."
+  //   "Change 1234 renamed change 1240 and submitted."
+  const renamed = /Change\s+\d+\s+renamed\s+change\s+(\d+)\s+and\s+submitted/i.exec(
+    stdout
+  );
+  if (renamed && renamed[1]) return renamed[1];
+  const plain = /Change\s+(\d+)\s+submitted/i.exec(stdout);
+  if (plain && plain[1]) return plain[1];
+  return fallback;
 }
 
 function normalizeDepotPath(depotPath: string): string {

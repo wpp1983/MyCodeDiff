@@ -482,6 +482,74 @@ describe("loadFileContentPair shelved", () => {
   });
 });
 
+describe("submitChange", () => {
+  test("rejects default CL without calling p4 submit", async () => {
+    let called = 0;
+    const runner: P4CommandRunner = async () => {
+      called++;
+      return { stdout: "", stderr: "", exitCode: 0 };
+    };
+    const svc = buildService({ runner });
+    await expect(
+      svc.submitChange({ changelistId: "default" })
+    ).rejects.toMatchObject({ code: "SUBMIT_FAILED" });
+    expect(called).toBe(0);
+  });
+
+  test("rejects CL with shelved files before calling p4 submit", async () => {
+    const describeOutput = [
+      "Change 1234 by alice@wp on 2024/11/20 10:00:00 *pending*",
+      "",
+      "\tmessage",
+      "",
+      "Shelved files ...",
+      "",
+      "... //depot/a/shelf.ts#7 edit",
+      "",
+    ].join("\n");
+    const seen: string[][] = [];
+    const runner: P4CommandRunner = async (args) => {
+      seen.push(args);
+      const key = args.join(" ");
+      if (key === "describe -S -s 1234") {
+        return { stdout: describeOutput, stderr: "", exitCode: 0 };
+      }
+      throw new Error(`unexpected p4 args: ${key}`);
+    };
+    const svc = buildService({ runner });
+    await expect(
+      svc.submitChange({ changelistId: "1234" })
+    ).rejects.toMatchObject({ code: "SUBMIT_FAILED" });
+    expect(seen.some((a) => a[0] === "submit")).toBe(false);
+  });
+
+  test("rejects empty CL with SUBMIT_EMPTY_CHANGE", async () => {
+    const runner = runnerFromMap({
+      "describe -S -s 1234": { stdout: "" },
+      "opened -c 1234": { stdout: "" },
+    });
+    const svc = buildService({ runner });
+    await expect(
+      svc.submitChange({ changelistId: "1234" })
+    ).rejects.toMatchObject({ code: "SUBMIT_EMPTY_CHANGE" });
+  });
+
+  test("happy path returns submittedChangeId from p4 stdout", async () => {
+    const runner = runnerFromMap({
+      "describe -S -s 1234": { stdout: "" },
+      "opened -c 1234": {
+        stdout: "//depot/a/a.ts#3 - edit default change (text)\n",
+      },
+      "submit -c 1234": {
+        stdout: "Change 1234 renamed change 1240 and submitted.\n",
+      },
+    });
+    const svc = buildService({ runner });
+    const out = await svc.submitChange({ changelistId: "1234" });
+    expect(out.submittedChangeId).toBe("1240");
+  });
+});
+
 describe("listHistoryChanges", () => {
   test("uses depotPaths[0] when not supplied", async () => {
     const seen: string[][] = [];

@@ -10,6 +10,9 @@ export type AppErrorCode =
   | "LARGE_FILE_REQUIRES_CONFIRMATION"
   | "LARGE_CHANGE_REQUIRES_CONFIRMATION"
   | "UNSUPPORTED_ACTION"
+  | "SUBMIT_FAILED"
+  | "SUBMIT_EMPTY_CHANGE"
+  | "SUBMIT_NEEDS_RESOLVE"
   | "UNKNOWN";
 
 export class AppError extends Error {

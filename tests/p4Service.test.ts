@@ -113,3 +113,94 @@ describe("p4Service command failure", () => {
     await expect(svc.listPendingChanges("wp")).rejects.toBeInstanceOf(AppError);
   });
 });
+
+describe("p4Service.submitChange", () => {
+  test("invokes p4 submit -c <CL> and parses 'Change N submitted.'", async () => {
+    const seen: string[][] = [];
+    const runner: P4CommandRunner = async (args) => {
+      seen.push(args);
+      return {
+        stdout:
+          "Submitting change 1234.\nLocking 1 files ...\nedit //depot/a/a.ts#5\nChange 1234 submitted.\n",
+        stderr: "",
+        exitCode: 0,
+      };
+    };
+    const svc = createP4Service({ runner });
+    const out = await svc.submitChange("1234");
+    expect(seen[0]).toEqual(["submit", "-c", "1234"]);
+    expect(out.submittedChangeId).toBe("1234");
+  });
+
+  test("parses 'Change M renamed change N and submitted'", async () => {
+    const runner = makeRunner({
+      "submit -c 1234": {
+        stdout:
+          "Submitting change 1234.\nChange 1234 renamed change 1240 and submitted.\n",
+      },
+    });
+    const svc = createP4Service({ runner });
+    const out = await svc.submitChange("1234");
+    expect(out.submittedChangeId).toBe("1240");
+  });
+
+  test("rejects default changelist", async () => {
+    const runner: P4CommandRunner = async () => {
+      throw new Error("should not be called");
+    };
+    const svc = createP4Service({ runner });
+    await expect(svc.submitChange("default")).rejects.toMatchObject({
+      code: "SUBMIT_FAILED",
+    });
+  });
+
+  test("auth expired maps to P4_AUTH_REQUIRED", async () => {
+    const runner = makeRunner({
+      "submit -c 1234": {
+        stderr: "Your session has expired, please login again.",
+        exitCode: 1,
+      },
+    });
+    const svc = createP4Service({ runner });
+    await expect(svc.submitChange("1234")).rejects.toMatchObject({
+      code: "P4_AUTH_REQUIRED",
+    });
+  });
+
+  test("'no files to submit' maps to SUBMIT_EMPTY_CHANGE", async () => {
+    const runner = makeRunner({
+      "submit -c 1234": {
+        stderr: "No files to submit from the default changelist.",
+        exitCode: 1,
+      },
+    });
+    const svc = createP4Service({ runner });
+    await expect(svc.submitChange("1234")).rejects.toMatchObject({
+      code: "SUBMIT_EMPTY_CHANGE",
+    });
+  });
+
+  test("resolve required maps to SUBMIT_NEEDS_RESOLVE", async () => {
+    const runner = makeRunner({
+      "submit -c 1234": {
+        stderr:
+          "//depot/a/a.ts - must resolve //depot/a/a.ts#6 before submitting",
+        exitCode: 1,
+      },
+    });
+    const svc = createP4Service({ runner });
+    await expect(svc.submitChange("1234")).rejects.toMatchObject({
+      code: "SUBMIT_NEEDS_RESOLVE",
+    });
+  });
+
+  test("other failure maps to SUBMIT_FAILED", async () => {
+    const runner = makeRunner({
+      "submit -c 1234": { stderr: "boom", exitCode: 1 },
+    });
+    const svc = createP4Service({ runner });
+    await expect(svc.submitChange("1234")).rejects.toMatchObject({
+      code: "SUBMIT_FAILED",
+    });
+  });
+});

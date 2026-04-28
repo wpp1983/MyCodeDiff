@@ -21,19 +21,24 @@ src/
     ipc/           # IPC 接口定义（contract.ts）
     models/        # AppConfig、ChangelistSummary、错误码 等
     p4/            # p4 命令输出解析（纯函数，便于测试）
+    normalize/     # diff kind 判定（text / csv / xlsx 等）共享逻辑
   main/            # Electron 主进程
+    index.ts       # 进程入口
+    ipc.ts         # IPC handler 注册（contract → service 的胶水）
     services/      # configService / p4Service / changeService / fileService 等
+      normalize/   # xlsxNormalize 等 main 端规范化（依赖 xlsx / iconv-lite）
   preload/         # contextBridge 暴露 window.mycodediff
   renderer/        # React UI
     components/    # DiffToolbar / ChangelistList / FileListView / PierreDiffView 等
     pages/         # PendingPage / HistoryPage
     state/         # changeStore、paneSizes 等 hook
     styles/        # CSS
+    workers/       # renderer 端 worker（如 fontDetect.worker.ts）
 tests/             # bun test：单元 + 集成（不要用 jest/vitest）
-scripts/           # smoke.ts、test-p4-env.ps1（PowerShell 7）
-docs/              # requirements / design / implementation-plan
+scripts/           # smoke.ts、test-p4-env.ps1（PowerShell 7）、网络诊断脚本
+docs/              # requirements / design / implementation-plan，做较大改动前先翻 design.md
 out/               # electron-vite 构建产物（main/preload/renderer）
-dist/              # 打包临时目录
+dist/              # electron-builder 输出，最终 exe 在 dist/win-unpacked/MyCodeDiff.exe
 ```
 
 ## 必跑命令
@@ -79,8 +84,13 @@ bun run package       # electron-builder --win --dir，产物在 release/
 5. **大文件 / 大 CL**
    - 文件 >2 MB 抛 `LARGE_FILE_REQUIRES_CONFIRMATION`，UI 提示后用 `confirmLargeFile: true` 重试
    - CL >500 文件给提示但仍按需懒加载
-6. **不在第一版做的事**（除非用户明确要求，不要主动加）
-   - shelved CL、文件搜索、报告导出、Git diff、目录比较、跨平台支持
+6. **CSV / XLSX diff**
+   - `core/normalize/diffKind.ts` 决定一个文件按什么 kind 走（text / csv / xlsx / binary）
+   - xlsx 解析在 `main/services/normalize/xlsxNormalize.ts`（main 端用 `xlsx` 包，renderer 不要直接 import）
+   - 编码探测/转换走 `iconv-lite`，统一在 main 端做完，传给 renderer 的永远是 UTF-8 文本
+7. **不在当前版本做的事**（除非用户明确要求，不要主动加）
+   - 文件搜索、报告导出、Git diff、普通目录比较、跨平台支持
+   - 注：shelved CL（pending 内）和 csv/xlsx diff **已经支持**，不要再当成"未做"拒绝改动
 
 ## 编码风格
 

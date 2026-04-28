@@ -7,6 +7,7 @@ import type {
   LoadChangelistInput,
   LoadFileContentPairInput,
   MyCodeDiffIpcChannel,
+  SubmitChangeInput,
 } from "@core/ipc/contract";
 import type { AppConfig } from "@core/models/configModel";
 
@@ -38,6 +39,8 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       change.loadChangelist(input),
     "mycodediff:loadFileContentPair": (_e, input: LoadFileContentPairInput) =>
       change.loadFileContentPair(input),
+    "mycodediff:submitChange": (_e, input: SubmitChangeInput) =>
+      change.submitChange(input),
     "mycodediff:getConfig": () => config.get(),
     "mycodediff:updateConfig": (_e, patch: Partial<AppConfig>) => config.update(patch),
   };

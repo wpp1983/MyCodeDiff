@@ -12,6 +12,8 @@ import type {
   LoadChangelistInput,
   LoadFileContentPairInput,
   P4Environment,
+  SubmitChangeInput,
+  SubmitChangeResult,
 } from "@core/ipc/contract";
 import { AppError } from "@core/models/errors";
 import type { P4Service } from "./p4Service";
@@ -20,6 +22,7 @@ import { createFileService } from "./fileService";
 import {
   actionToStatus,
   isBinaryFileType,
+  type ParsedDescribe,
   type ParsedDescribeFile,
   type ParsedOpenedFile,
 } from "@core/p4/p4Parsers";
@@ -43,6 +46,7 @@ export type ChangeService = {
   listShelvedChanges(): Promise<ChangelistListItem[]>;
   loadChangelist(input: LoadChangelistInput): Promise<ChangelistSummary>;
   loadFileContentPair(input: LoadFileContentPairInput): Promise<FileContentPair>;
+  submitChange(input: SubmitChangeInput): Promise<SubmitChangeResult>;
   getEnvironment(): Promise<P4Environment>;
 };
 
@@ -141,14 +145,16 @@ export function createChangeService(options: ChangeServiceOptions): ChangeServic
       return file;
     });
 
-    // The default CL cannot hold shelved files; numbered pending CLs may.
+    let described: ParsedDescribe | null = null;
+    // The default CL cannot hold shelved files and has no describe form; numbered
+    // pending CLs may, and `describe -S` also returns the CL's description/author.
     if (id !== "default") {
       try {
-        const shelvedDescribe = await p4.describeShelved(id);
-        if (shelvedDescribe) {
+        described = await p4.describeShelved(id);
+        if (described) {
           // Only the shelvedFiles section — `describe -S` may also include the
           // CL's affected files which we must NOT mistake for shelved entries.
-          for (const sf of shelvedDescribe.shelvedFiles) {
+          for (const sf of described.shelvedFiles) {
             const file = fileFromShelvedDescribe(sf);
             file.shelved = true;
             files.push(file);
@@ -161,12 +167,17 @@ export function createChangeService(options: ChangeServiceOptions): ChangeServic
     }
 
     const largeChange = files.length > largeChangeThreshold;
-    return {
+    const summary: ChangelistSummary = {
       id,
       kind: "pending",
       files,
       largeChange,
     };
+    if (described?.author) summary.author = described.author;
+    if (described?.client) summary.client = described.client;
+    if (described?.description) summary.description = described.description;
+    if (described?.status) summary.status = described.status;
+    return summary;
   }
 
   async function loadSubmitted(id: string): Promise<ChangelistSummary> {
@@ -539,12 +550,50 @@ export function createChangeService(options: ChangeServiceOptions): ChangeServic
     return p4.getEnvironment();
   }
 
+  async function submitChange(input: SubmitChangeInput): Promise<SubmitChangeResult> {
+    const id = input.changelistId.trim();
+    if (!id || id === "default") {
+      throw new AppError(
+        "SUBMIT_FAILED",
+        "Default changelist cannot be submitted. Move files into a numbered changelist first."
+      );
+    }
+
+    // Refuse if the CL has shelved files — p4 submit -c will fail anyway, but
+    // give a clearer up-front message. (To submit the shelf itself, the user
+    // should use `p4 submit -e`, which is not yet supported by this app.)
+    let shelvedCount = 0;
+    try {
+      const sd = await p4.describeShelved(id);
+      shelvedCount = sd?.shelvedFiles.length ?? 0;
+    } catch {
+      shelvedCount = 0;
+    }
+    if (shelvedCount > 0) {
+      throw new AppError(
+        "SUBMIT_FAILED",
+        `Changelist ${id} contains ${shelvedCount} shelved file(s). Unshelve them first, or submit the shelf via 'p4 submit -e' (not yet supported here).`
+      );
+    }
+
+    const opened = await p4.opened(id);
+    if (opened.length === 0) {
+      throw new AppError(
+        "SUBMIT_EMPTY_CHANGE",
+        `Changelist ${id} has no opened files to submit.`
+      );
+    }
+
+    return p4.submitChange(id);
+  }
+
   return {
     listPendingChanges,
     listHistoryChanges,
     listShelvedChanges,
     loadChangelist,
     loadFileContentPair,
+    submitChange,
     getEnvironment,
   };
 }

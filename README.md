@@ -62,8 +62,8 @@ node install.js
 bun run package
 ```
 
-产物在 `release/`（`electron-builder --dir` 产生）。
-生产构建不依赖 dev server。
+产物在 `dist/win-unpacked/MyCodeDiff.exe`（`electron-builder --win --dir` 产生）。
+生产构建不依赖 dev server，双击 exe 直接运行。
 
 ## P4 环境诊断
 

@@ -10,6 +10,7 @@ const api: MyCodeDiffApi = {
   loadChangelist: (input) => ipcRenderer.invoke("mycodediff:loadChangelist", input),
   loadFileContentPair: (input) =>
     ipcRenderer.invoke("mycodediff:loadFileContentPair", input),
+  submitChange: (input) => ipcRenderer.invoke("mycodediff:submitChange", input),
   getConfig: () => ipcRenderer.invoke("mycodediff:getConfig"),
   updateConfig: (patch) => ipcRenderer.invoke("mycodediff:updateConfig", patch),
 };

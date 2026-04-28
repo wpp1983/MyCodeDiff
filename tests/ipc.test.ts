@@ -31,6 +31,7 @@ describe("registerIpcHandlers", () => {
       "mycodediff:listShelvedChanges",
       "mycodediff:loadChangelist",
       "mycodediff:loadFileContentPair",
+      "mycodediff:submitChange",
       "mycodediff:updateConfig",
     ]);
   });
